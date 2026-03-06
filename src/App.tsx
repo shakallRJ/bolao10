@@ -29,7 +29,9 @@ import {
   ArrowLeft,
   Bell,
   Mail,
-  MessageCircle
+  MessageCircle,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -345,7 +347,9 @@ const LoginPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
   const [name, setName] = useState('');
   const [nickname, setNickname] = useState('');
   const [phone, setPhone] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const { login } = useAuth();
 
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -364,6 +368,7 @@ const LoginPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setSuccess('');
     const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
     const body = isRegister ? { email, password, name, nickname, phone } : { email, password };
 
@@ -379,6 +384,30 @@ const LoginPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
         onNavigate('dashboard');
       } else {
         setError(data.error);
+      }
+    } catch (err) {
+      setError('Erro ao conectar com o servidor');
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email) {
+      setError('Por favor, insira seu e-mail para solicitar a recuperação.');
+      return;
+    }
+    setError('');
+    setSuccess('');
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      if (res.ok) {
+        setSuccess('Solicitação enviada ao administrador. Por favor, aguarde o contato.');
+      } else {
+        const data = await res.json();
+        setError(data.error || 'Erro ao processar solicitação');
       }
     } catch (err) {
       setError('Erro ao conectar com o servidor');
@@ -402,6 +431,12 @@ const LoginPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
         {error && (
           <div className="mb-6 p-4 bg-red-50 text-red-600 rounded-xl text-sm flex items-center">
             <AlertCircle className="w-4 h-4 mr-2" /> {error}
+          </div>
+        )}
+
+        {success && (
+          <div className="mb-6 p-4 bg-green-50 text-green-600 rounded-xl text-sm flex items-center">
+            <CheckCircle2 className="w-4 h-4 mr-2" /> {success}
           </div>
         )}
 
@@ -456,15 +491,37 @@ const LoginPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Senha</label>
-            <input 
-              type="password" 
-              required 
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-secondary focus:border-transparent outline-none transition-all"
-              placeholder="••••••••"
-            />
+            <div className="relative">
+              <input 
+                type={showPassword ? "text" : "password"} 
+                required 
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-secondary focus:border-transparent outline-none transition-all pr-12"
+                placeholder="••••••••"
+              />
+              <button 
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+              </button>
+            </div>
           </div>
+          
+          {!isRegister && (
+            <div className="text-right">
+              <button 
+                type="button"
+                onClick={handleForgotPassword}
+                className="text-xs text-secondary hover:underline font-medium"
+              >
+                Esqueci minha senha
+              </button>
+            </div>
+          )}
+
           <button 
             type="submit"
             className="w-full bg-primary text-white py-4 rounded-xl font-semibold hover:bg-opacity-90 transition-all mt-4"
@@ -1162,9 +1219,10 @@ const AdminDashboard = () => {
   const [financialDetails, setFinancialDetails] = useState<any>({ jackpotPool: 0, prizesHistory: [], withdrawalsHistory: [] });
   const [newWithdrawal, setNewWithdrawal] = useState({ amount: '', reason: '' });
   const [showWithdrawalForm, setShowWithdrawalForm] = useState(false);
+  const [adminNotifications, setAdminNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewingProof, setViewingProof] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'pending' | 'rounds' | 'users' | 'financial' | 'history'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'rounds' | 'users' | 'financial' | 'history' | 'notifications'>('pending');
   const [roundHistory, setRoundHistory] = useState<any[]>([]);
   
   // Create Round State
@@ -1244,10 +1302,26 @@ const AdminDashboard = () => {
     setRoundHistory(data);
   };
 
+  const fetchAdminNotifications = async () => {
+    const res = await fetch('/api/admin/financial-details', { // We can reuse this or create a new one, but let's check if there's a better way
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    // Actually, let's just fetch from a new endpoint or reuse financial-details if I update it
+  };
+
+  // I'll update server.ts to include notifications in financial-details or create a new endpoint
+  const fetchNotifications = async () => {
+    const res = await fetch('/api/admin/notifications', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (res.ok) setAdminNotifications(await res.json());
+  };
+
   useEffect(() => { 
     setLoading(true);
     const promises = [fetchPending(), fetchCurrentRound()];
     if (activeTab === 'users') promises.push(fetchUsers());
+    if (activeTab === 'notifications') promises.push(fetchNotifications());
     if (activeTab === 'financial') {
       promises.push(fetchFinancials());
       promises.push(fetchFinancialDetails());
@@ -1346,7 +1420,8 @@ const AdminDashboard = () => {
             { id: 'rounds', label: 'Rodadas' },
             { id: 'users', label: 'Usuários' },
             { id: 'financial', label: 'Financeiro' },
-            { id: 'history', label: 'Histórico' }
+            { id: 'history', label: 'Histórico' },
+            { id: 'notifications', label: 'Alertas' }
           ].map(tab => (
             <button 
               key={tab.id}
@@ -1565,6 +1640,7 @@ const AdminDashboard = () => {
                 <tr className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">
                   <th className="px-6 py-4">Nome / Nickname</th>
                   <th className="px-6 py-4">Contato</th>
+                  <th className="px-6 py-4">Senha</th>
                   <th className="px-6 py-4">Role</th>
                   <th className="px-6 py-4">Ações</th>
                 </tr>
@@ -1579,6 +1655,9 @@ const AdminDashboard = () => {
                     <td className="px-6 py-4 text-sm">
                       <p>{u.email}</p>
                       {u.phone && <p className="text-xs text-gray-500">{u.phone}</p>}
+                    </td>
+                    <td className="px-6 py-4">
+                      <code className="bg-gray-100 px-2 py-1 rounded text-xs font-mono">{u.password}</code>
                     </td>
                     <td className="px-6 py-4">
                       <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${u.role === 'admin' ? 'bg-purple-100 text-purple-600' : 'bg-gray-100 text-gray-600'}`}>
@@ -1599,6 +1678,16 @@ const AdminDashboard = () => {
                         >
                           E-mail
                         </a>
+                        {u.phone && (
+                          <a 
+                            href={`https://wa.me/55${u.phone.replace(/\D/g, '')}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-green-500 hover:underline text-xs font-bold"
+                          >
+                            WhatsApp
+                          </a>
+                        )}
                         <button 
                           onClick={() => handleDeleteUser(u.id)}
                           className="text-red-600 hover:underline text-xs font-bold"
@@ -1611,6 +1700,58 @@ const AdminDashboard = () => {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'notifications' && (
+        <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+            <h3 className="font-bold text-primary">Alertas e Solicitações</h3>
+            <Bell className="w-5 h-5 text-secondary" />
+          </div>
+          <div className="divide-y divide-gray-100">
+            {adminNotifications.length === 0 ? (
+              <div className="p-12 text-center text-gray-400 italic">
+                Nenhum alerta pendente.
+              </div>
+            ) : (
+              adminNotifications.map((n: any) => (
+                <div key={n.id} className="p-6 hover:bg-gray-50 transition-colors">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-start space-x-4">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${n.type === 'forgot_password' ? 'bg-orange-100 text-orange-600' : 'bg-blue-100 text-blue-600'}`}>
+                        {n.type === 'forgot_password' ? <AlertCircle className="w-5 h-5" /> : <Bell className="w-5 h-5" />}
+                      </div>
+                      <div>
+                        <p className="font-bold text-gray-900">{n.message}</p>
+                        <p className="text-sm text-gray-500 mt-1">
+                          Solicitado em {format(new Date(n.date), 'dd/MM/yyyy HH:mm')}
+                        </p>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <a 
+                            href={`mailto:${n.user_email}?subject=Recuperação de Senha - Bolão10&body=Olá ${n.user_name}, recebemos sua solicitação de recuperação de senha.`}
+                            className="bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors flex items-center"
+                          >
+                            <Mail className="w-3.5 h-3.5 mr-1.5" /> Enviar E-mail
+                          </a>
+                          {n.user_phone && (
+                            <a 
+                              href={`https://wa.me/55${n.user_phone.replace(/\D/g, '')}?text=Olá ${n.user_name}, recebemos sua solicitação de recuperação de senha no Bolão10.`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="bg-green-50 text-green-600 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-green-100 transition-colors flex items-center"
+                            >
+                              <MessageCircle className="w-3.5 h-3.5 mr-1.5" /> Enviar WhatsApp
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       )}
@@ -1926,6 +2067,16 @@ const AdminDashboard = () => {
                   <option value="user">User</option>
                   <option value="admin">Admin</option>
                 </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Senha</label>
+                <input 
+                  type="text" 
+                  value={editingUser.password || ''}
+                  onChange={(e) => setEditingUser({...editingUser, password: e.target.value})}
+                  className="w-full px-4 py-2 rounded-xl border border-gray-200"
+                  placeholder="Senha do usuário"
+                />
               </div>
               <div className="flex gap-4 pt-4">
                 <button type="button" onClick={() => setEditingUser(null)} className="flex-1 py-2 bg-gray-100 rounded-xl">Cancelar</button>

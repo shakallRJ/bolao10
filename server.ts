@@ -68,10 +68,10 @@ app.get('/api/health', async (req, res) => {
 app.post('/api/auth/register', async (req, res) => {
   const { email, password, name, nickname, phone } = req.body;
   try {
-    const hashedPassword = bcrypt.hashSync(password, 10);
+    // Storing password in plain text as requested to allow admin to view it
     const { data, error } = await supabase
       .from('users')
-      .insert([{ email, password: hashedPassword, name, nickname, phone }])
+      .insert([{ email, password, name, nickname, phone }])
       .select()
       .single();
 
@@ -93,45 +93,19 @@ app.post('/api/auth/login', async (req, res) => {
   }
 
   try {
-    // Check if Supabase is configured
-    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      console.error('Supabase environment variables are missing!');
-      // We don't want to crash, but we can't proceed.
-      // If it's the dummy key, it will fail anyway.
-    }
-
     const { data: user, error } = await supabase
       .from('users')
       .select('*')
       .eq('email', email)
       .single();
 
-    if (error) {
-      console.error('Supabase query error:', error);
-      return res.status(401).json({ error: 'Credenciais inválidas ou erro no banco de dados' });
+    if (error || !user) {
+      return res.status(401).json({ error: 'E-mail ou senha incorretos' });
     }
 
-    if (!user || !user.password) {
-      return res.status(401).json({ error: 'Credenciais inválidas' });
-    }
-
-    let isValidPassword = false;
-    try {
-      // Use bcrypt.compareSync safely
-      const compare = (bcrypt as any).compareSync || (bcrypt as any).default?.compareSync;
-      if (typeof compare === 'function') {
-        isValidPassword = compare(password, user.password);
-      } else {
-        console.error('bcrypt.compareSync is not a function');
-        isValidPassword = password === user.password;
-      }
-    } catch (e) {
-      console.warn('Bcrypt comparison failed, falling back to plain text check:', e);
-      isValidPassword = password === user.password;
-    }
-
-    if (!isValidPassword) {
-      return res.status(401).json({ error: 'Credenciais inválidas' });
+    // Comparing plain text passwords as requested
+    if (password !== user.password) {
+      return res.status(401).json({ error: 'E-mail ou senha incorretos' });
     }
 
     const token = jwt.sign(
@@ -145,11 +119,37 @@ app.post('/api/auth/login', async (req, res) => {
       user: { id: user.id, email: user.email, name: user.name, role: user.role, nickname: user.nickname, phone: user.phone } 
     });
   } catch (err: any) {
-    console.error('Login route crash:', err);
-    res.status(500).json({ 
-      error: 'Erro interno no servidor', 
-      details: process.env.NODE_ENV === 'development' ? err.message : undefined 
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Erro interno no servidor' });
+  }
+});
+
+app.post('/api/auth/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  try {
+    const { data: user, error } = await supabase.from('users').select('*').eq('email', email).maybeSingle();
+    if (error || !user) return res.status(404).json({ error: 'Usuário não encontrado' });
+
+    // Notify admin via a notification in settings
+    const { data: currentNotifs } = await supabase.from('settings').select('value').eq('key', 'admin_notifications').maybeSingle();
+    const notifications = currentNotifs ? JSON.parse(currentNotifs.value) : [];
+    
+    notifications.unshift({
+      id: Date.now(),
+      type: 'forgot_password',
+      user_id: user.id,
+      user_name: user.name,
+      user_email: user.email,
+      user_phone: user.phone,
+      date: new Date().toISOString(),
+      message: `O usuário ${user.name} (@${user.nickname}) solicitou recuperação de senha.`
     });
+
+    await supabase.from('settings').upsert({ key: 'admin_notifications', value: JSON.stringify(notifications.slice(0, 50)) }, { onConflict: 'key' });
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao processar solicitação' });
   }
 });
 
@@ -571,10 +571,14 @@ app.get('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
 app.put('/api/admin/users/:id', authenticate, isAdmin, async (req, res) => {
   try {
-    const { name, nickname, role, phone } = req.body;
+    const { name, nickname, role, phone, password } = req.body;
+    const updateData: any = { name, nickname, role, phone };
+    if (password) {
+      updateData.password = password; // Plain text as requested
+    }
     const { error } = await supabase
       .from('users')
-      .update({ name, nickname, role, phone })
+      .update(updateData)
       .eq('id', req.params.id);
     if (error) throw error;
     res.json({ success: true });
@@ -638,6 +642,16 @@ app.post('/api/admin/withdrawals', authenticate, isAdmin, async (req, res) => {
 });
 
 // Admin: Financial Summary
+app.get('/api/admin/notifications', authenticate, isAdmin, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('settings').select('value').eq('key', 'admin_notifications').maybeSingle();
+    if (error) throw error;
+    res.json(data ? JSON.parse(data.value) : []);
+  } catch (err) {
+    res.status(500).json({ error: 'Falha ao buscar notificações' });
+  }
+});
+
 app.get('/api/admin/financial-summary', authenticate, isAdmin, async (req, res) => {
   try {
     const { data: rounds } = await supabase
