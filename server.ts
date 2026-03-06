@@ -153,6 +153,47 @@ app.post('/api/auth/forgot-password', async (req, res) => {
   }
 });
 
+app.put('/api/my-profile', authenticate, async (req: any, res) => {
+  const { name, nickname, phone, password } = req.body;
+  const userId = req.user.id;
+
+  try {
+    const updateData: any = { name, nickname, phone };
+    if (password) {
+      updateData.password = password; // Plain text as requested in previous turn
+    }
+
+    const { data, error } = await supabase
+      .from('users')
+      .update(updateData)
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === '23505') {
+        return res.status(400).json({ error: 'Nickname já está em uso' });
+      }
+      throw error;
+    }
+
+    // Generate new token with updated user info
+    const token = jwt.sign(
+      { id: data.id, email: data.email, role: data.role, name: data.name, nickname: data.nickname, phone: data.phone }, 
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({ 
+      token,
+      user: { id: data.id, email: data.email, name: data.name, role: data.role, nickname: data.nickname, phone: data.phone } 
+    });
+  } catch (err) {
+    console.error('Update profile error:', err);
+    res.status(500).json({ error: 'Erro ao atualizar perfil' });
+  }
+});
+
 // Rounds & Games
 app.get('/api/rounds', async (req, res) => {
   try {

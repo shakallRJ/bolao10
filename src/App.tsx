@@ -164,6 +164,7 @@ const Navbar = ({ onNavigate, currentPage }: { onNavigate: (page: string) => voi
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, show: !!user },
     { id: 'predictions', label: 'Fazer Palpite', icon: Trophy, show: !!user && !isAdmin },
     { id: 'wallet', label: 'Minha Carteira', icon: Wallet, show: !!user && !isAdmin },
+    { id: 'profile', label: 'Meu Perfil', icon: UserIcon, show: !!user },
     { id: 'transparency', label: 'Transparência', icon: ShieldCheck, show: !!user },
     { id: 'ranking', label: 'Ranking', icon: BarChart2, show: !!user },
     { id: 'terms', label: 'Regras', icon: FileText, show: true },
@@ -199,10 +200,13 @@ const Navbar = ({ onNavigate, currentPage }: { onNavigate: (page: string) => voi
             {user ? (
               <div className="flex items-center space-x-4">
                 <NotificationsDropdown />
-                <div className="flex items-center text-sm text-gray-700">
+                <button 
+                  onClick={() => onNavigate('profile')}
+                  className="flex items-center text-sm text-gray-700 hover:text-primary transition-colors"
+                >
                   <UserIcon className="w-4 h-4 mr-2" />
                   {user.name}
-                </div>
+                </button>
                 <button
                   onClick={logout}
                   className="text-gray-500 hover:text-red-600 transition-colors"
@@ -645,6 +649,193 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
   );
 };
 
+const ProfilePage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
+  const { token, user, login } = useAuth();
+  const [name, setName] = useState(user?.name || '');
+  const [nickname, setNickname] = useState(user?.nickname || '');
+  const [phone, setPhone] = useState(user?.phone || '');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let value = e.target.value.replace(/\D/g, '');
+    if (value.length > 11) value = value.slice(0, 11);
+    
+    if (value.length > 2) {
+      value = `(${value.slice(0, 2)}) ${value.slice(2)}`;
+    }
+    if (value.length > 10) {
+      value = `${value.slice(0, 10)}-${value.slice(10)}`;
+    }
+    setPhone(value);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setSuccess(null);
+
+    if (password && password !== confirmPassword) {
+      return setError('As senhas não coincidem');
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch('/api/my-profile', {
+        method: 'PUT',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ name, nickname, phone, password: password || undefined })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao atualizar perfil');
+
+      login(data.token, data.user);
+      setSuccess('Perfil atualizado com sucesso!');
+      setPassword('');
+      setConfirmPassword('');
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <header className="bg-primary text-white p-4 flex justify-between items-center shadow-md">
+        <div className="flex items-center space-x-4">
+          <button onClick={() => onNavigate('dashboard')} className="hover:bg-white/10 p-2 rounded-full transition-colors">
+            <ArrowLeft className="w-6 h-6" />
+          </button>
+          <h1 className="text-xl font-bold">Editar Perfil</h1>
+        </div>
+      </header>
+
+      <main className="flex-1 p-4 md:p-8 max-w-2xl mx-auto w-full">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white rounded-[40px] shadow-sm border border-gray-100 p-8 md:p-12"
+        >
+          <div className="flex items-center space-x-4 mb-8">
+            <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center text-primary">
+              <UserIcon className="w-8 h-8" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900">Configurações da Conta</h2>
+              <p className="text-gray-500">Mantenha seus dados atualizados</p>
+            </div>
+          </div>
+
+          {error && (
+            <div className="mb-6 p-4 bg-red-50 text-red-600 rounded-2xl text-sm flex items-center">
+              <AlertCircle className="w-4 h-4 mr-2" /> {error}
+            </div>
+          )}
+
+          {success && (
+            <div className="mb-6 p-4 bg-green-50 text-green-600 rounded-2xl text-sm flex items-center">
+              <CheckCircle2 className="w-4 h-4 mr-2" /> {success}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2 uppercase tracking-wider">Nome Completo</label>
+                <input 
+                  type="text" 
+                  required 
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full px-4 py-3 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-secondary outline-none transition-all"
+                  placeholder="Seu nome"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2 uppercase tracking-wider">Nickname (Apelido)</label>
+                <input 
+                  type="text" 
+                  required 
+                  value={nickname}
+                  onChange={(e) => setNickname(e.target.value)}
+                  className="w-full px-4 py-3 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-secondary outline-none transition-all"
+                  placeholder="Seu apelido"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-2 uppercase tracking-wider">Telefone (WhatsApp)</label>
+              <input 
+                type="tel" 
+                required 
+                value={phone}
+                onChange={handlePhoneChange}
+                className="w-full px-4 py-3 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-secondary outline-none transition-all"
+                placeholder="(00) 00000-0000"
+              />
+            </div>
+
+            <hr className="border-gray-100 my-8" />
+            
+            <h3 className="text-lg font-bold text-primary mb-4">Alterar Senha</h3>
+            <p className="text-sm text-gray-500 mb-6">Deixe em branco se não desejar alterar sua senha atual.</p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2 uppercase tracking-wider">Nova Senha</label>
+                <div className="relative">
+                  <input 
+                    type={showPassword ? "text" : "password"} 
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full px-4 py-3 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-secondary outline-none transition-all pr-12"
+                    placeholder="••••••••"
+                  />
+                  <button 
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2 uppercase tracking-wider">Confirmar Nova Senha</label>
+                <input 
+                  type={showPassword ? "text" : "password"} 
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full px-4 py-3 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-secondary outline-none transition-all"
+                  placeholder="••••••••"
+                />
+              </div>
+            </div>
+
+            <button 
+              type="submit"
+              disabled={loading}
+              className="w-full bg-primary text-white py-4 rounded-2xl font-bold hover:bg-opacity-90 transition-all shadow-md disabled:opacity-50 mt-8"
+            >
+              {loading ? 'Salvando...' : 'Salvar Alterações'}
+            </button>
+          </form>
+        </motion.div>
+      </main>
+    </div>
+  );
+};
+
 const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
   const { token, user } = useAuth();
   const [currentRound, setCurrentRound] = useState<any>(null);
@@ -728,7 +919,7 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
         <div className="lg:col-span-2 space-y-8">
           {/* Wallet Summary */}
           {walletData && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-3xl p-6 text-white shadow-md flex items-center justify-between">
                 <div>
                   <p className="text-green-100 font-medium mb-1">Total Ganho</p>
@@ -745,6 +936,15 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
                 </div>
                 <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center">
                   <Wallet className="w-6 h-6 text-primary" />
+                </div>
+              </div>
+              <div className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm flex items-center justify-between cursor-pointer hover:shadow-md transition-all" onClick={() => onNavigate('profile')}>
+                <div>
+                  <p className="text-gray-500 font-medium mb-1">Meu Perfil</p>
+                  <p className="text-xl font-bold text-primary">Editar Dados</p>
+                </div>
+                <div className="w-12 h-12 bg-secondary/10 rounded-full flex items-center justify-center">
+                  <UserIcon className="w-6 h-6 text-secondary" />
                 </div>
               </div>
             </div>
@@ -2536,6 +2736,7 @@ export default function App() {
       case 'login': return <LoginPage onNavigate={setPage} />;
       case 'dashboard': return <Dashboard onNavigate={setPage} />;
       case 'wallet': return <WalletPage onNavigate={setPage} />;
+      case 'profile': return <ProfilePage onNavigate={setPage} />;
       case 'predictions': return <PredictionsPage onNavigate={setPage} />;
       case 'admin': return isAdmin ? <AdminDashboard /> : <Dashboard onNavigate={setPage} />;
       case 'transparency': return <TransparencyPage />;
