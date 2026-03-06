@@ -342,14 +342,28 @@ const LoginPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [nickname, setNickname] = useState('');
+  const [phone, setPhone] = useState('');
   const [error, setError] = useState('');
   const { login } = useAuth();
+
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let value = e.target.value.replace(/\D/g, '');
+    if (value.length > 11) value = value.slice(0, 11);
+    
+    if (value.length > 2) {
+      value = `(${value.slice(0, 2)}) ${value.slice(2)}`;
+    }
+    if (value.length > 10) {
+      value = `${value.slice(0, 10)}-${value.slice(10)}`;
+    }
+    setPhone(value);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
-    const body = isRegister ? { email, password, name, nickname } : { email, password };
+    const body = isRegister ? { email, password, name, nickname, phone } : { email, password };
 
     try {
       const res = await fetch(endpoint, {
@@ -412,6 +426,17 @@ const LoginPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
                   onChange={(e) => setNickname(e.target.value)}
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-secondary focus:border-transparent outline-none transition-all"
                   placeholder="Ex: artilheiro10"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Telefone (WhatsApp)</label>
+                <input 
+                  type="tel" 
+                  required 
+                  value={phone}
+                  onChange={handlePhoneChange}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-secondary focus:border-transparent outline-none transition-all"
+                  placeholder="(00) 00000-0000"
                 />
               </div>
             </>
@@ -1341,6 +1366,7 @@ const AdminDashboard = () => {
                     <td className="px-6 py-4">
                       <p className="font-bold text-primary">{p.user_name} ({p.user_nickname})</p>
                       <p className="text-xs text-gray-500">{p.user_email}</p>
+                      {p.user_phone && <p className="text-xs text-gray-500">{p.user_phone}</p>}
                     </td>
                     <td className="px-6 py-4 font-medium">#{p.round_number}</td>
                     <td className="px-6 py-4 text-sm text-gray-500">{format(new Date(p.created_at), 'dd/MM HH:mm')}</td>
@@ -1523,7 +1549,7 @@ const AdminDashboard = () => {
               <thead>
                 <tr className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">
                   <th className="px-6 py-4">Nome / Nickname</th>
-                  <th className="px-6 py-4">E-mail</th>
+                  <th className="px-6 py-4">Contato</th>
                   <th className="px-6 py-4">Role</th>
                   <th className="px-6 py-4">Ações</th>
                 </tr>
@@ -1535,7 +1561,10 @@ const AdminDashboard = () => {
                       <p className="font-bold text-primary">{u.name}</p>
                       <p className="text-xs text-gray-500">@{u.nickname}</p>
                     </td>
-                    <td className="px-6 py-4 text-sm">{u.email}</td>
+                    <td className="px-6 py-4 text-sm">
+                      <p>{u.email}</p>
+                      {u.phone && <p className="text-xs text-gray-500">{u.phone}</p>}
+                    </td>
                     <td className="px-6 py-4">
                       <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${u.role === 'admin' ? 'bg-purple-100 text-purple-600' : 'bg-gray-100 text-gray-600'}`}>
                         {u.role}
@@ -1838,6 +1867,21 @@ const AdminDashboard = () => {
                   type="text" 
                   value={editingUser.nickname}
                   onChange={(e) => setEditingUser({...editingUser, nickname: e.target.value})}
+                  className="w-full px-4 py-2 rounded-xl border border-gray-200"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Telefone</label>
+                <input 
+                  type="tel" 
+                  value={editingUser.phone || ''}
+                  onChange={(e) => {
+                    let value = e.target.value.replace(/\D/g, '');
+                    if (value.length > 11) value = value.slice(0, 11);
+                    if (value.length > 2) value = `(${value.slice(0, 2)}) ${value.slice(2)}`;
+                    if (value.length > 10) value = `${value.slice(0, 10)}-${value.slice(10)}`;
+                    setEditingUser({...editingUser, phone: value});
+                  }}
                   className="w-full px-4 py-2 rounded-xl border border-gray-200"
                 />
               </div>

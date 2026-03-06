@@ -5,6 +5,7 @@ interface User {
   email: string;
   name: string;
   nickname: string;
+  phone?: string;
   role: 'user' | 'admin';
 }
 

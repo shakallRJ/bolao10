@@ -66,19 +66,19 @@ app.get('/api/health', async (req, res) => {
 
 // Auth
 app.post('/api/auth/register', async (req, res) => {
-  const { email, password, name, nickname } = req.body;
+  const { email, password, name, nickname, phone } = req.body;
   try {
     const hashedPassword = bcrypt.hashSync(password, 10);
     const { data, error } = await supabase
       .from('users')
-      .insert([{ email, password: hashedPassword, name, nickname }])
+      .insert([{ email, password: hashedPassword, name, nickname, phone }])
       .select()
       .single();
 
     if (error) throw error;
 
-    const token = jwt.sign({ id: data.id, email: data.email, role: data.role, name: data.name, nickname: data.nickname }, JWT_SECRET);
-    res.json({ token, user: { id: data.id, email: data.email, name: data.name, role: data.role, nickname: data.nickname } });
+    const token = jwt.sign({ id: data.id, email: data.email, role: data.role, name: data.name, nickname: data.nickname, phone: data.phone }, JWT_SECRET);
+    res.json({ token, user: { id: data.id, email: data.email, name: data.name, role: data.role, nickname: data.nickname, phone: data.phone } });
   } catch (err: any) {
     console.error('Register error:', err);
     res.status(400).json({ error: 'Email ou Nickname já existe ou dados inválidos' });
@@ -135,14 +135,14 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role, name: user.name, nickname: user.nickname }, 
+      { id: user.id, email: user.email, role: user.role, name: user.name, nickname: user.nickname, phone: user.phone }, 
       JWT_SECRET,
       { expiresIn: '7d' }
     );
     
     res.json({ 
       token, 
-      user: { id: user.id, email: user.email, name: user.name, role: user.role, nickname: user.nickname } 
+      user: { id: user.id, email: user.email, name: user.name, role: user.role, nickname: user.nickname, phone: user.phone } 
     });
   } catch (err: any) {
     console.error('Login route crash:', err);
@@ -556,7 +556,7 @@ app.get('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   try {
     const { data: users, error } = await supabase
       .from('users')
-      .select('id, email, name, nickname, role, created_at')
+      .select('id, email, name, nickname, role, created_at, phone')
       .order('created_at', { ascending: false });
     if (error) throw error;
     res.json(users);
@@ -567,10 +567,10 @@ app.get('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
 app.put('/api/admin/users/:id', authenticate, isAdmin, async (req, res) => {
   try {
-    const { name, nickname, role } = req.body;
+    const { name, nickname, role, phone } = req.body;
     const { error } = await supabase
       .from('users')
-      .update({ name, nickname, role })
+      .update({ name, nickname, role, phone })
       .eq('id', req.params.id);
     if (error) throw error;
     res.json({ success: true });
@@ -712,7 +712,7 @@ app.get('/api/admin/pending-predictions', authenticate, isAdmin, async (req, res
       .from('predictions')
       .select(`
         *,
-        users (name, email),
+        users (name, email, nickname, phone),
         rounds (number)
       `)
       .eq('status', 'pending');
@@ -722,6 +722,7 @@ app.get('/api/admin/pending-predictions', authenticate, isAdmin, async (req, res
       user_name: p.users.name,
       user_nickname: p.users.nickname,
       user_email: p.users.email,
+      user_phone: p.users.phone,
       round_number: p.rounds.number
     }));
 
