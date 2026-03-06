@@ -1614,50 +1614,65 @@ const AdminDashboard = () => {
         </div>
       )}
 
-      {activeTab === 'financial' && (
-        <div className="space-y-8">
-          {/* Summary Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            <div className="bg-white p-6 rounded-3xl border-l-4 border-blue-500 shadow-sm flex justify-between items-center">
-              <div>
-                <p className="text-xs font-bold text-gray-400 uppercase mb-1">Total Arrecadação</p>
-                <p className="text-2xl font-bold text-primary">R$ {financials.reduce((acc, f) => acc + (f.total_collected || 0), 0).toFixed(2)}</p>
-              </div>
-              <div className="w-12 h-12 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center">
-                <TrendingUp className="w-6 h-6" />
-              </div>
-            </div>
+      {activeTab === 'financial' && (() => {
+        const totalAdminFee = financials.reduce((acc, f) => acc + (f.admin_fee_collected || 0), 0);
+        const totalWithdrawals = financialDetails.withdrawalsHistory.reduce((acc: number, w: any) => acc + w.amount, 0);
+        const caixa = totalAdminFee - totalWithdrawals;
 
-            <div className="bg-white p-6 rounded-3xl border-l-4 border-green-500 shadow-sm flex justify-between items-center">
-              <div>
-                <p className="text-xs font-bold text-gray-400 uppercase mb-1">Valor Distribuído (75%)</p>
-                <p className="text-2xl font-bold text-primary">R$ {financials.reduce((acc, f) => acc + (f.winners_prize || 0), 0).toFixed(2)}</p>
+        return (
+          <div className="space-y-8">
+            {/* Summary Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
+              <div className="bg-white p-6 rounded-3xl border-l-4 border-blue-500 shadow-sm flex justify-between items-center">
+                <div>
+                  <p className="text-xs font-bold text-gray-400 uppercase mb-1">Total Arrecadação</p>
+                  <p className="text-2xl font-bold text-primary">R$ {financials.reduce((acc, f) => acc + (f.total_collected || 0), 0).toFixed(2)}</p>
+                </div>
+                <div className="w-12 h-12 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center">
+                  <TrendingUp className="w-6 h-6" />
+                </div>
               </div>
-              <div className="w-12 h-12 bg-green-50 text-green-500 rounded-full flex items-center justify-center">
-                <Gift className="w-6 h-6" />
-              </div>
-            </div>
 
-            <div className="bg-white p-6 rounded-3xl border-l-4 border-gray-800 shadow-sm flex justify-between items-center">
-              <div>
-                <p className="text-xs font-bold text-gray-400 uppercase mb-1">Taxa Admin (20%)</p>
-                <p className="text-2xl font-bold text-primary">R$ {financials.reduce((acc, f) => acc + (f.admin_fee_collected || 0), 0).toFixed(2)}</p>
+              <div className="bg-white p-6 rounded-3xl border-l-4 border-green-500 shadow-sm flex justify-between items-center">
+                <div>
+                  <p className="text-xs font-bold text-gray-400 uppercase mb-1">Valor Distribuído (75%)</p>
+                  <p className="text-2xl font-bold text-primary">R$ {financials.reduce((acc, f) => acc + (f.winners_prize || 0), 0).toFixed(2)}</p>
+                </div>
+                <div className="w-12 h-12 bg-green-50 text-green-500 rounded-full flex items-center justify-center">
+                  <Gift className="w-6 h-6" />
+                </div>
               </div>
-              <div className="w-12 h-12 bg-gray-50 text-gray-800 rounded-full flex items-center justify-center">
-                <Wallet className="w-6 h-6" />
-              </div>
-            </div>
 
-            <div className="bg-white p-6 rounded-3xl border-l-4 border-purple-500 shadow-sm flex justify-between items-center">
-              <div>
-                <p className="text-xs font-bold text-gray-400 uppercase mb-1">Bônus Acumulado Atual</p>
-                <p className="text-2xl font-bold text-purple-600">R$ {financialDetails.jackpotPool.toFixed(2)}</p>
+              <div className="bg-white p-6 rounded-3xl border-l-4 border-gray-800 shadow-sm flex justify-between items-center">
+                <div>
+                  <p className="text-xs font-bold text-gray-400 uppercase mb-1">Taxa Admin (20%)</p>
+                  <p className="text-2xl font-bold text-primary">R$ {totalAdminFee.toFixed(2)}</p>
+                </div>
+                <div className="w-12 h-12 bg-gray-50 text-gray-800 rounded-full flex items-center justify-center">
+                  <Wallet className="w-6 h-6" />
+                </div>
               </div>
-              <div className="w-12 h-12 bg-purple-50 text-purple-500 rounded-full flex items-center justify-center">
-                <DollarSign className="w-6 h-6" />
+
+              <div className="bg-white p-6 rounded-3xl border-l-4 border-orange-500 shadow-sm flex justify-between items-center">
+                <div>
+                  <p className="text-xs font-bold text-gray-400 uppercase mb-1">Caixa (Disponível)</p>
+                  <p className="text-2xl font-bold text-orange-600">R$ {caixa.toFixed(2)}</p>
+                </div>
+                <div className="w-12 h-12 bg-orange-50 text-orange-500 rounded-full flex items-center justify-center">
+                  <DollarSign className="w-6 h-6" />
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-3xl border-l-4 border-purple-500 shadow-sm flex justify-between items-center">
+                <div>
+                  <p className="text-xs font-bold text-gray-400 uppercase mb-1">Bônus Acumulado Atual</p>
+                  <p className="text-2xl font-bold text-purple-600">R$ {financialDetails.jackpotPool.toFixed(2)}</p>
+                </div>
+                <div className="w-12 h-12 bg-purple-50 text-purple-500 rounded-full flex items-center justify-center">
+                  <DollarSign className="w-6 h-6" />
+                </div>
               </div>
             </div>
-          </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {/* Prizes History */}
@@ -1805,7 +1820,8 @@ const AdminDashboard = () => {
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {activeTab === 'history' && (
         <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
@@ -1950,7 +1966,7 @@ const AdminDashboard = () => {
 };
 
 const TransparencyPage = () => {
-  const { token } = useAuth();
+  const { token, isAdmin } = useAuth();
   const [rounds, setRounds] = useState<any[]>([]);
   const [selectedRoundId, setSelectedRoundId] = useState<string>('');
   const [round, setRound] = useState<any>(null);
@@ -1981,9 +1997,10 @@ const TransparencyPage = () => {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const accessData = await accessRes.json();
-      setHasAccess(accessData.hasPrediction);
+      const userHasAccess = accessData.hasPrediction || isAdmin;
+      setHasAccess(userHasAccess);
 
-      if (accessData.hasPrediction) {
+      if (userHasAccess) {
         // Fetch round details including games
         const roundRes = await fetch(`/api/rounds/${selectedRoundId}`);
         const roundData = await roundRes.json();

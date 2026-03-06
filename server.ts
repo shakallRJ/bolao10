@@ -536,6 +536,10 @@ app.get('/api/rounds/:id/transparency', async (req, res) => {
 
 app.get('/api/rounds/:id/check-prediction', authenticate, async (req: any, res) => {
   try {
+    if (req.user.role === 'admin') {
+      return res.json({ hasPrediction: true });
+    }
+
     const { data, error } = await supabase
       .from('predictions')
       .select('id')
