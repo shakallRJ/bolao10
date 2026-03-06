@@ -1095,11 +1095,12 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
             <div className="mt-8 pt-6 border-t border-gray-100 text-sm text-gray-500">
               <p className="mb-3 font-medium text-gray-600">Problemas com o pagamento? Entre em contato:</p>
               <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
-                <a href="mailto:admin@bolao10.com" className="text-blue-600 hover:text-blue-700 hover:underline flex items-center transition-colors bg-blue-50 px-4 py-2 rounded-full">
-                  <Mail className="w-4 h-4 mr-2" /> admin@bolao10.com
+                <span className="text-gray-500 font-medium">Contato:</span>
+                <a href="mailto:admin@bolao10.com" className="text-blue-600 hover:text-blue-700 hover:underline flex items-center transition-colors bg-blue-50 p-3 rounded-full shadow-sm" title="admin@bolao10.com">
+                  <Mail className="w-5 h-5" />
                 </a>
-                <a href="https://wa.me/5521989886919" target="_blank" rel="noopener noreferrer" className="text-green-600 hover:text-green-700 hover:underline flex items-center transition-colors bg-green-50 px-4 py-2 rounded-full">
-                  <MessageCircle className="w-4 h-4 mr-2" /> (21) 98988-6919
+                <a href="https://wa.me/5521989886916" target="_blank" rel="noopener noreferrer" className="text-green-600 hover:text-green-700 hover:underline flex items-center transition-colors bg-green-50 p-3 rounded-full shadow-sm" title="(21) 98988-6916">
+                  <MessageCircle className="w-5 h-5" />
                 </a>
               </div>
             </div>
@@ -2413,14 +2414,13 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 text-center">
           <p className="text-sm text-gray-500">© 2026 BOLÃO10 - Entretenimento baseado em conhecimento esportivo.</p>
           <p className="text-xs text-gray-400 mt-2">Plataforma transparente e auditável entre amigos.</p>
-          <div className="mt-4 flex justify-center items-center space-x-6">
-            <a href="mailto:admin@bolao10.com" className="text-gray-500 hover:text-primary transition-colors flex items-center text-sm">
-              <Mail className="w-4 h-4 mr-2" />
-              admin@bolao10.com
+          <div className="mt-4 flex justify-center items-center space-x-4">
+            <span className="text-gray-400 text-xs font-medium">Contato:</span>
+            <a href="mailto:admin@bolao10.com" className="text-gray-500 hover:text-primary transition-colors flex items-center text-sm" title="admin@bolao10.com">
+              <Mail className="w-5 h-5" />
             </a>
-            <a href="https://wa.me/5521989886919" target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-green-600 transition-colors flex items-center text-sm">
-              <MessageCircle className="w-4 h-4 mr-2" />
-              (21) 98988-6919
+            <a href="https://wa.me/5521989886916" target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-green-600 transition-colors flex items-center text-sm" title="(21) 98988-6916">
+              <MessageCircle className="w-5 h-5" />
             </a>
           </div>
         </div>
