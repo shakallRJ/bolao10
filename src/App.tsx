@@ -27,7 +27,9 @@ import {
   TrendingDown,
   Info,
   ArrowLeft,
-  Bell
+  Bell,
+  Mail,
+  MessageCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -1087,6 +1089,18 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
                     </span>
                   )}
                 </label>
+              </div>
+            </div>
+
+            <div className="mt-8 pt-6 border-t border-gray-100 text-sm text-gray-500">
+              <p className="mb-3 font-medium text-gray-600">Problemas com o pagamento? Entre em contato:</p>
+              <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
+                <a href="mailto:admin@bolao10.com" className="text-blue-600 hover:text-blue-700 hover:underline flex items-center transition-colors bg-blue-50 px-4 py-2 rounded-full">
+                  <Mail className="w-4 h-4 mr-2" /> admin@bolao10.com
+                </a>
+                <a href="https://wa.me/5521989886919" target="_blank" rel="noopener noreferrer" className="text-green-600 hover:text-green-700 hover:underline flex items-center transition-colors bg-green-50 px-4 py-2 rounded-full">
+                  <MessageCircle className="w-4 h-4 mr-2" /> (21) 98988-6919
+                </a>
               </div>
             </div>
           </div>
@@ -2382,6 +2396,16 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 text-center">
           <p className="text-sm text-gray-500">© 2026 BOLÃO10 - Entretenimento baseado em conhecimento esportivo.</p>
           <p className="text-xs text-gray-400 mt-2">Plataforma transparente e auditável entre amigos.</p>
+          <div className="mt-4 flex justify-center items-center space-x-6">
+            <a href="mailto:admin@bolao10.com" className="text-gray-500 hover:text-primary transition-colors flex items-center text-sm">
+              <Mail className="w-4 h-4 mr-2" />
+              admin@bolao10.com
+            </a>
+            <a href="https://wa.me/5521989886919" target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-green-600 transition-colors flex items-center text-sm">
+              <MessageCircle className="w-4 h-4 mr-2" />
+              (21) 98988-6919
+            </a>
+          </div>
         </div>
       </footer>
     </div>
