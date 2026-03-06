@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from './contexts/AuthContext';
 import { 
   Trophy, 
@@ -36,6 +36,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Download } from 'lucide-react';
 import QRCode from 'react-qr-code';
+import { generatePixPayload } from './utils/pix';
 
 // --- COMPONENTS ---
 
@@ -932,7 +933,16 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
     }
   };
 
-  const pixPayload = "00020126580014br.gov.bcb.pix0136123e4567-e89b-12d3-a456-4266141740005204000053039865802BR5913Bolao10 Admin6009Sao Paulo62070503***6304ABCD";
+  const totalAmount = (predictionsList.length || 1) * (round?.entry_value || 10);
+
+  const pixPayload = useMemo(() => {
+    return generatePixPayload(
+      'admin@bolao10.com',
+      'BOLAO10',
+      'SAO PAULO',
+      totalAmount
+    );
+  }, [totalAmount]);
 
   const copyPix = () => {
     navigator.clipboard.writeText(pixPayload);
@@ -942,8 +952,6 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
 
   if (loading) return <div className="flex justify-center items-center h-64">Carregando...</div>;
   if (!round || round.status !== 'open') return <div className="text-center py-20">Nenhuma rodada aberta no momento.</div>;
-
-  const totalAmount = (predictionsList.length || 1) * (round.entry_value || 10);
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
