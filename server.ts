@@ -514,9 +514,7 @@ app.post('/api/predictions', authenticate, upload.single('proof'), async (req: a
   try {
     const { roundId, guesses } = req.body;
     const parsedGuesses = JSON.parse(guesses);
-    const proofPath = req.file?.path;
-
-    if (!proofPath) return res.status(400).json({ error: 'Comprovante é obrigatório' });
+    const proofPath = req.file ? `/uploads/${req.file.filename}` : null;
 
     // Check if round is open and deadline hasn't passed
     const { data: round, error: roundErr } = await supabase
@@ -538,6 +536,7 @@ app.post('/api/predictions', authenticate, upload.single('proof'), async (req: a
     }
 
     const guessesArray = Array.isArray(parsedGuesses) ? parsedGuesses : [parsedGuesses];
+    const createdIds = [];
 
     for (const singleGuess of guessesArray) {
       // 1. Create prediction
@@ -553,6 +552,7 @@ app.post('/api/predictions', authenticate, upload.single('proof'), async (req: a
         .single();
 
       if (predErr) throw predErr;
+      createdIds.push(prediction.id);
 
       // 2. Create items
       const items = Object.entries(singleGuess).map(([gameId, guess]) => ({
@@ -565,10 +565,32 @@ app.post('/api/predictions', authenticate, upload.single('proof'), async (req: a
       if (itemsErr) throw itemsErr;
     }
 
-    res.json({ success: true });
+    res.json({ success: true, ids: createdIds });
   } catch (err) {
     console.error('Prediction submission error:', err);
     res.status(500).json({ error: 'Falha ao enviar palpite' });
+  }
+});
+
+app.post('/api/predictions/attach-proof', authenticate, upload.single('proof'), async (req: any, res) => {
+  try {
+    const { predictionIds } = req.body;
+    const ids = JSON.parse(predictionIds);
+    
+    if (!req.file) return res.status(400).json({ error: 'Comprovante é obrigatório' });
+    const proofPath = `/uploads/${req.file.filename}`;
+
+    const { error } = await supabase
+      .from('predictions')
+      .update({ proof_path: proofPath, status: 'pending' })
+      .in('id', ids)
+      .eq('user_id', req.user.id);
+
+    if (error) throw error;
+    res.json({ success: true, proofPath });
+  } catch (err) {
+    console.error('Attach proof error:', err);
+    res.status(500).json({ error: 'Erro ao enviar comprovante' });
   }
 });
 

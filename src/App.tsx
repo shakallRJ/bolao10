@@ -1203,6 +1203,7 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
   const [submitting, setSubmitting] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showDeadlinePopup, setShowDeadlinePopup] = useState(false);
+  const [pendingPredictionIds, setPendingPredictionIds] = useState<number[]>([]);
 
   useEffect(() => {
     fetch('/api/rounds/current')
@@ -1231,26 +1232,70 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
     setGuesses(prev => ({ ...prev, [gameId]: guess }));
   };
 
-  const handleAddPrediction = () => {
-    if (round && round.start_time && new Date() > new Date(round.start_time)) {
-      setShowDeadlinePopup(true);
-      return;
+  const savePrediction = async (currentGuesses: Record<number, string>) => {
+    const formData = new FormData();
+    formData.append('roundId', round.id);
+    formData.append('guesses', JSON.stringify([currentGuesses]));
+
+    try {
+      const res = await fetch('/api/predictions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: formData
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setPendingPredictionIds(prev => [...prev, ...data.ids]);
+        return true;
+      } else {
+        alert(data.error || 'Erro ao salvar palpite');
+        return false;
+      }
+    } catch (err) {
+      alert('Erro ao salvar palpite');
+      return false;
     }
-    setPredictionsList(prev => [...prev, guesses]);
-    setGuesses({});
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleProceedToPayment = () => {
+  const handleAddPrediction = async () => {
     if (round && round.start_time && new Date() > new Date(round.start_time)) {
       setShowDeadlinePopup(true);
       return;
     }
-    if (Object.keys(guesses).length === 10) {
+    if (Object.keys(guesses).length < 10) {
+      return alert('Por favor, complete todos os 10 palpites antes de adicionar outro.');
+    }
+    
+    setSubmitting(true);
+    const success = await savePrediction(guesses);
+    if (success) {
       setPredictionsList(prev => [...prev, guesses]);
       setGuesses({});
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
-    setStep(2);
+    setSubmitting(false);
+  };
+
+  const handleProceedToPayment = async () => {
+    if (round && round.start_time && new Date() > new Date(round.start_time)) {
+      setShowDeadlinePopup(true);
+      return;
+    }
+    
+    setSubmitting(true);
+    if (Object.keys(guesses).length === 10) {
+      const success = await savePrediction(guesses);
+      if (success) {
+        setPredictionsList(prev => [...prev, guesses]);
+        setGuesses({});
+        setStep(2);
+      }
+    } else if (predictionsList.length > 0) {
+      setStep(2);
+    } else {
+      alert('Complete seu palpite antes de prosseguir.');
+    }
+    setSubmitting(false);
   };
 
   const handleSubmit = async () => {
@@ -1262,22 +1307,21 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
     setSubmitting(true);
     
     const formData = new FormData();
-    formData.append('roundId', round.id);
-    formData.append('guesses', JSON.stringify(predictionsList));
+    formData.append('predictionIds', JSON.stringify(pendingPredictionIds));
     formData.append('proof', file);
 
     try {
-      const res = await fetch('/api/predictions', {
+      const res = await fetch('/api/predictions/attach-proof', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData
       });
       if (res.ok) {
-        alert('Palpite(s) enviado(s) com sucesso! Aguarde a validação.');
+        alert('Comprovante enviado com sucesso! Aguarde a validação.');
         onNavigate('dashboard');
       } else {
         const data = await res.json();
-        alert(data.error || 'Erro ao enviar palpite');
+        alert(data.error || 'Erro ao enviar comprovante');
       }
     } catch (err) {
       alert('Erro de conexão');
@@ -1357,18 +1401,18 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
 
           <div className="flex flex-col sm:flex-row gap-4 mt-8">
             <button
-              disabled={Object.keys(guesses).length < 10}
+              disabled={Object.keys(guesses).length < 10 || submitting}
               onClick={handleAddPrediction}
               className="flex-1 bg-gray-100 text-primary py-4 rounded-2xl font-bold text-lg hover:bg-gray-200 transition-all disabled:opacity-50"
             >
-              Fazer Mais um Palpite
+              {submitting ? 'Salvando...' : 'Fazer Mais um Palpite'}
             </button>
             <button
-              disabled={Object.keys(guesses).length < 10 && predictionsList.length === 0}
+              disabled={(Object.keys(guesses).length < 10 && predictionsList.length === 0) || submitting}
               onClick={handleProceedToPayment}
               className="flex-1 bg-primary text-white py-4 rounded-2xl font-bold text-lg hover:shadow-lg transition-all disabled:opacity-50"
             >
-              Continuar para Pagamento
+              {submitting ? 'Salvando...' : 'Continuar para Pagamento'}
             </button>
           </div>
         </motion.div>
