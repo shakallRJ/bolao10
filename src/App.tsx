@@ -552,25 +552,53 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
   const [walletData, setWalletData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [uploadingId, setUploadingId] = useState<number | null>(null);
+  const [proofFile, setProofFile] = useState<File | null>(null);
+
+  const fetchWallet = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch('/api/my-wallet', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Falha ao carregar resumo financeiro');
+      const data = await res.json();
+      setWalletData(data);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchWallet = async () => {
-      if (!token) return;
-      try {
-        const res = await fetch('/api/my-wallet', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (!res.ok) throw new Error('Falha ao carregar resumo financeiro');
-        const data = await res.json();
-        setWalletData(data);
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchWallet();
   }, [token]);
+
+  const handleUpdateProof = async (id: number) => {
+    if (!proofFile) return alert('Selecione o comprovante.');
+    
+    setUploadingId(id);
+    const formData = new FormData();
+    formData.append('proof', proofFile);
+
+    try {
+      const res = await fetch(`/api/predictions/${id}/proof`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: formData
+      });
+
+      if (!res.ok) throw new Error('Falha ao enviar comprovante');
+      alert('Comprovante enviado com sucesso! Aguarde a validação.');
+      setProofFile(null);
+      setUploadingId(null);
+      fetchWallet();
+    } catch (err: any) {
+      alert(err.message);
+      setUploadingId(null);
+    }
+  };
 
   if (loading) return <div className="flex justify-center items-center h-screen"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div></div>;
 
@@ -644,6 +672,47 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
             </p>
           </div>
         </div>
+
+        {walletData?.pendingPredictions?.length > 0 && (
+          <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 md:p-8">
+            <h3 className="text-xl font-bold text-primary mb-6 flex items-center">
+              <Clock className="w-5 h-5 mr-2" /> Palpites Pendentes de Pagamento
+            </h3>
+            <div className="space-y-4">
+              {walletData.pendingPredictions.map((p: any) => (
+                <div key={p.id} className="p-4 bg-orange-50 border border-orange-100 rounded-2xl">
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div>
+                      <p className="font-bold text-orange-800">Rodada #{p.rounds?.number}</p>
+                      <p className="text-sm text-orange-600">Aguardando validação do comprovante.</p>
+                      <p className="text-xs text-orange-500 mt-1">Enviado em: {format(new Date(p.created_at), 'dd/MM/yyyy HH:mm')}</p>
+                    </div>
+                    <div className="w-full md:w-auto">
+                      <div className="flex flex-col space-y-2">
+                        <label className="text-xs font-bold text-orange-700 uppercase">Reenviar Comprovante:</label>
+                        <div className="flex gap-2">
+                          <input 
+                            type="file" 
+                            accept="image/*"
+                            onChange={(e) => setProofFile(e.target.files?.[0] || null)}
+                            className="text-xs file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-orange-100 file:text-orange-700 hover:file:bg-orange-200"
+                          />
+                          <button 
+                            onClick={() => handleUpdateProof(p.id)}
+                            disabled={uploadingId === p.id || !proofFile}
+                            className="bg-orange-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-orange-700 transition-all disabled:opacity-50"
+                          >
+                            {uploadingId === p.id ? 'Enviando...' : 'Pagar Palpite Pendente'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
@@ -1420,6 +1489,7 @@ const AdminDashboard = () => {
   const [newWithdrawal, setNewWithdrawal] = useState({ amount: '', reason: '' });
   const [showWithdrawalForm, setShowWithdrawalForm] = useState(false);
   const [adminNotifications, setAdminNotifications] = useState<any[]>([]);
+  const [viewingPrediction, setViewingPrediction] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [viewingProof, setViewingProof] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'pending' | 'rounds' | 'users' | 'financial' | 'history' | 'notifications'>('pending');
@@ -1646,6 +1716,7 @@ const AdminDashboard = () => {
                   <th className="px-6 py-4">Usuário</th>
                   <th className="px-6 py-4">Rodada</th>
                   <th className="px-6 py-4">Data Envio</th>
+                  <th className="px-6 py-4">Palpites</th>
                   <th className="px-6 py-4">Comprovante</th>
                   <th className="px-6 py-4">Ações</th>
                 </tr>
@@ -1660,6 +1731,14 @@ const AdminDashboard = () => {
                     </td>
                     <td className="px-6 py-4 font-medium">#{p.round_number}</td>
                     <td className="px-6 py-4 text-sm text-gray-500">{format(new Date(p.created_at), 'dd/MM HH:mm')}</td>
+                    <td className="px-6 py-4">
+                      <button 
+                        onClick={() => setViewingPrediction(p)}
+                        className="text-primary hover:underline text-sm font-bold"
+                      >
+                        Ver Palpites
+                      </button>
+                    </td>
                     <td className="px-6 py-4">
                       <button 
                         onClick={() => setViewingProof(p.proof_path)}
@@ -2288,6 +2367,62 @@ const AdminDashboard = () => {
       )}
 
       <AnimatePresence>
+        {viewingPrediction && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="bg-white rounded-[40px] max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl"
+            >
+              <div className="p-8 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <div>
+                  <h3 className="text-2xl font-bold text-primary">Palpites de {viewingPrediction.user_nickname}</h3>
+                  <p className="text-gray-500">Rodada #{viewingPrediction.round_number}</p>
+                </div>
+                <button onClick={() => setViewingPrediction(null)} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-8">
+                <div className="space-y-3">
+                  {viewingPrediction.games?.map((game: any) => {
+                    const item = viewingPrediction.items?.find((i: any) => i.game_id === game.id);
+                    return (
+                      <div key={game.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-100">
+                        <div className="flex-1">
+                          <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Jogo {game.game_order}</p>
+                          <p className="font-bold text-primary">{game.team_home} vs {game.team_away}</p>
+                        </div>
+                        <div className="flex items-center space-x-4">
+                          <div className="text-center">
+                            <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Palpite</p>
+                            <span className="bg-primary text-white px-4 py-1 rounded-full font-bold text-sm">
+                              {item?.guess === '1' ? 'Casa' : item?.guess === 'X' ? 'Empate' : 'Fora'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="p-8 border-t border-gray-100 bg-gray-50 flex justify-end">
+                <button 
+                  onClick={() => setViewingPrediction(null)}
+                  className="px-8 py-3 bg-primary text-white rounded-2xl font-bold hover:shadow-lg transition-all"
+                >
+                  Fechar
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
         {viewingProof && (
           <div className="fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
             <motion.div 

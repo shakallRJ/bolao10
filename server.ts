@@ -378,9 +378,8 @@ app.get('/api/my-wallet', authenticate, async (req: any, res) => {
   try {
     const { data: predictions, error } = await supabase
       .from('predictions')
-      .select('*, rounds(entry_value, status, winners_names, winners_prize)')
-      .eq('user_id', req.user.id)
-      .eq('status', 'approved'); // Only count approved predictions for spending
+      .select('*, rounds(id, number, entry_value, status, winners_names, winners_prize)')
+      .eq('user_id', req.user.id);
 
     if (error) {
       console.error('Supabase error in /api/my-wallet:', error);
@@ -395,9 +394,11 @@ app.get('/api/my-wallet', authenticate, async (req: any, res) => {
 
     let totalSpent = 0;
     let totalWinnings = 0;
-    const predictionsMade = predictions?.length || 0;
+    const approvedPredictions = predictions?.filter(p => p.status === 'approved') || [];
+    const pendingPredictions = predictions?.filter(p => p.status === 'pending') || [];
+    const predictionsMade = approvedPredictions.length;
 
-    predictions?.forEach((p: any) => {
+    approvedPredictions.forEach((p: any) => {
       const entryValue = p.rounds?.entry_value || 10;
       totalSpent += entryValue;
 
@@ -405,7 +406,7 @@ app.get('/api/my-wallet', authenticate, async (req: any, res) => {
         // Check if user won the regular prize
         const winners = p.rounds?.winners_names?.split(',').map((w: string) => w.trim()) || [];
         if (winners.includes(req.user.nickname) || winners.includes(req.user.name)) {
-          totalWinnings += (p.rounds?.winners_prize || 0) / winners.length;
+          totalWinnings += (p.rounds?.winners_prize || 0) / (winners.length || 1);
         }
 
         // Check if user won the jackpot
@@ -413,16 +414,35 @@ app.get('/api/my-wallet', authenticate, async (req: any, res) => {
         if (roundJackpot) {
           const jackpotWinners = roundJackpot.winners_names?.split(',').map((w: string) => w.trim()) || [];
           if (jackpotWinners.includes(req.user.nickname) || jackpotWinners.includes(req.user.name)) {
-            totalWinnings += (roundJackpot.prize_paid || 0) / jackpotWinners.length;
+            totalWinnings += (roundJackpot.prize_paid || 0) / (jackpotWinners.length || 1);
           }
         }
       }
     });
 
-    res.json({ totalSpent, predictionsMade, totalWinnings });
+    res.json({ totalSpent, predictionsMade, totalWinnings, pendingPredictions });
   } catch (err) {
     console.error('Wallet error:', err);
     res.status(500).json({ error: 'Falha ao buscar resumo financeiro' });
+  }
+});
+
+app.put('/api/predictions/:id/proof', authenticate, upload.single('proof'), async (req: any, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Comprovante é obrigatório' });
+    const proofPath = `/uploads/${req.file.filename}`;
+
+    const { error } = await supabase
+      .from('predictions')
+      .update({ proof_path: proofPath, status: 'pending' })
+      .eq('id', req.params.id)
+      .eq('user_id', req.user.id);
+
+    if (error) throw error;
+    res.json({ success: true, proofPath });
+  } catch (err) {
+    console.error('Update proof error:', err);
+    res.status(500).json({ error: 'Erro ao enviar comprovante' });
   }
 });
 
@@ -772,7 +792,8 @@ app.get('/api/admin/pending-predictions', authenticate, isAdmin, async (req, res
       .select(`
         *,
         users (name, email, nickname, phone),
-        rounds (number)
+        rounds (number, games(*)),
+        prediction_items (*)
       `)
       .eq('status', 'pending');
 
@@ -782,7 +803,9 @@ app.get('/api/admin/pending-predictions', authenticate, isAdmin, async (req, res
       user_nickname: p.users.nickname,
       user_email: p.users.email,
       user_phone: p.users.phone,
-      round_number: p.rounds.number
+      round_number: p.rounds.number,
+      games: p.rounds.games?.sort((a: any, b: any) => a.game_order - b.game_order) || [],
+      items: p.prediction_items || []
     }));
 
     res.json(formatted || []);
