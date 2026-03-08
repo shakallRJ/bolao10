@@ -513,14 +513,24 @@ app.get('/api/my-notifications', authenticate, async (req: any, res) => {
 app.post('/api/predictions', authenticate, upload.single('proof'), async (req: any, res) => {
   try {
     const { roundId, guesses } = req.body;
+    
+    if (!roundId || roundId === 'undefined' || !guesses) {
+      return res.status(400).json({ error: 'Dados incompletos ou inválidos (roundId ou guesses ausentes)' });
+    }
+
     const parsedGuesses = JSON.parse(guesses);
-    const proofPath = req.file ? `/uploads/${req.file.filename}` : null;
+    const proofPath = req.file ? `/uploads/${req.file.filename}` : '';
+    const rId = parseInt(roundId);
+
+    if (isNaN(rId)) {
+      return res.status(400).json({ error: 'ID da rodada inválido' });
+    }
 
     // Check if round is open and deadline hasn't passed
     const { data: round, error: roundErr } = await supabase
       .from('rounds')
       .select('status, start_time')
-      .eq('id', roundId)
+      .eq('id', rId)
       .single();
 
     if (roundErr || !round) {
@@ -544,37 +554,47 @@ app.post('/api/predictions', authenticate, upload.single('proof'), async (req: a
         .from('predictions')
         .insert([{ 
           user_id: req.user.id, 
-          round_id: roundId, 
+          round_id: rId, 
           proof_path: proofPath,
           status: 'pending'
         }])
         .select()
         .single();
 
-      if (predErr) throw predErr;
+      if (predErr) {
+        console.error('Supabase Prediction Insert Error:', predErr);
+        throw new Error(`Erro ao criar palpite: ${predErr.message}`);
+      }
       createdIds.push(prediction.id);
 
       // 2. Create items
       const items = Object.entries(singleGuess).map(([gameId, guess]) => ({
         prediction_id: prediction.id,
-        game_id: gameId,
+        game_id: parseInt(gameId),
         guess
       }));
 
       const { error: itemsErr } = await supabase.from('prediction_items').insert(items);
-      if (itemsErr) throw itemsErr;
+      if (itemsErr) {
+        console.error('Supabase Items Insert Error:', itemsErr);
+        throw new Error(`Erro ao criar itens do palpite: ${itemsErr.message}`);
+      }
     }
 
     res.json({ success: true, ids: createdIds });
-  } catch (err) {
+  } catch (err: any) {
     console.error('Prediction submission error:', err);
-    res.status(500).json({ error: 'Falha ao enviar palpite' });
+    res.status(500).json({ error: err.message || 'Falha ao enviar palpite' });
   }
 });
 
 app.post('/api/predictions/attach-proof', authenticate, upload.single('proof'), async (req: any, res) => {
   try {
     const { predictionIds } = req.body;
+    if (!predictionIds || predictionIds === 'undefined' || predictionIds === '[]') {
+      return res.status(400).json({ error: 'Nenhum palpite selecionado para anexar comprovante' });
+    }
+    
     const ids = JSON.parse(predictionIds);
     
     if (!req.file) return res.status(400).json({ error: 'Comprovante é obrigatório' });
@@ -586,11 +606,14 @@ app.post('/api/predictions/attach-proof', authenticate, upload.single('proof'), 
       .in('id', ids)
       .eq('user_id', req.user.id);
 
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase Proof Update Error:', error);
+      throw new Error(`Erro ao atualizar comprovante: ${error.message}`);
+    }
     res.json({ success: true, proofPath });
-  } catch (err) {
+  } catch (err: any) {
     console.error('Attach proof error:', err);
-    res.status(500).json({ error: 'Erro ao enviar comprovante' });
+    res.status(500).json({ error: err.message || 'Erro ao enviar comprovante' });
   }
 });
 

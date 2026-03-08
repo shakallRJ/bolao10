@@ -1196,14 +1196,36 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
   const { token } = useAuth();
   const [round, setRound] = useState<any>(null);
   const [guesses, setGuesses] = useState<Record<number, string>>({});
-  const [predictionsList, setPredictionsList] = useState<Record<number, string>[]>([]);
-  const [step, setStep] = useState(1); // 1: Palpites, 2: Pagamento
+  const [predictionsList, setPredictionsList] = useState<Record<number, string>[]>(() => {
+    const saved = localStorage.getItem('bolao10_predictions_list');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [step, setStep] = useState(() => {
+    const saved = localStorage.getItem('bolao10_prediction_step');
+    return saved ? parseInt(saved) : 1;
+  }); // 1: Palpites, 2: Pagamento
+
+  useEffect(() => {
+    localStorage.setItem('bolao10_predictions_list', JSON.stringify(predictionsList));
+  }, [predictionsList]);
+
+  useEffect(() => {
+    localStorage.setItem('bolao10_prediction_step', step.toString());
+  }, [step]);
+
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showDeadlinePopup, setShowDeadlinePopup] = useState(false);
-  const [pendingPredictionIds, setPendingPredictionIds] = useState<number[]>([]);
+  const [pendingPredictionIds, setPendingPredictionIds] = useState<number[]>(() => {
+    const saved = localStorage.getItem('bolao10_pending_ids');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('bolao10_pending_ids', JSON.stringify(pendingPredictionIds));
+  }, [pendingPredictionIds]);
 
   useEffect(() => {
     fetch('/api/rounds/current')
@@ -1214,6 +1236,21 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
       .then(data => {
         setRound(data);
         setLoading(false);
+        
+        // Clear session if it's a different round
+        const savedRoundId = localStorage.getItem('bolao10_current_round_id');
+        if (savedRoundId && data && savedRoundId !== data.id.toString()) {
+          localStorage.removeItem('bolao10_pending_ids');
+          localStorage.removeItem('bolao10_predictions_list');
+          localStorage.removeItem('bolao10_prediction_step');
+          setPendingPredictionIds([]);
+          setPredictionsList([]);
+          setStep(1);
+        }
+        if (data) {
+          localStorage.setItem('bolao10_current_round_id', data.id.toString());
+        }
+
         if (data && data.start_time && new Date() > new Date(data.start_time)) {
           setShowDeadlinePopup(true);
         }
@@ -1233,8 +1270,12 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
   };
 
   const savePrediction = async (currentGuesses: Record<number, string>) => {
+    if (!round?.id) {
+      alert('Erro: Rodada não identificada. Por favor, recarregue a página.');
+      return false;
+    }
     const formData = new FormData();
-    formData.append('roundId', round.id);
+    formData.append('roundId', round.id.toString());
     formData.append('guesses', JSON.stringify([currentGuesses]));
 
     try {
@@ -1318,6 +1359,9 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
       });
       if (res.ok) {
         alert('Comprovante enviado com sucesso! Aguarde a validação.');
+        localStorage.removeItem('bolao10_pending_ids');
+        localStorage.removeItem('bolao10_predictions_list');
+        localStorage.removeItem('bolao10_prediction_step');
         onNavigate('dashboard');
       } else {
         const data = await res.json();
@@ -1330,9 +1374,10 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
     }
   };
 
-  const totalAmount = (predictionsList.length || 1) * (round?.entry_value || 10);
+  const totalAmount = (predictionsList.length) * (round?.entry_value || 10);
 
   const pixPayload = useMemo(() => {
+    if (totalAmount <= 0) return '';
     return generatePixPayload(
       'admin@bolao10.com',
       'BOLAO10',
@@ -1369,8 +1414,23 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
           
           {predictionsList.length > 0 && (
             <div className="bg-green-50 p-4 rounded-2xl text-green-700 text-sm mb-6 flex items-center justify-between">
-              <span className="font-bold">{predictionsList.length} palpite(s) adicionado(s) ao carrinho.</span>
-              <span className="font-bold">Total: R$ {(predictionsList.length * (round.entry_value || 10)).toFixed(2)}</span>
+              <div className="flex flex-col">
+                <span className="font-bold">{predictionsList.length} palpite(s) adicionado(s) ao carrinho.</span>
+                <span className="font-bold">Total: R$ {(predictionsList.length * (round.entry_value || 10)).toFixed(2)}</span>
+              </div>
+              <button 
+                onClick={() => {
+                  if(confirm('Deseja limpar todos os palpites salvos nesta sessão?')) {
+                    localStorage.removeItem('bolao10_pending_ids');
+                    localStorage.removeItem('bolao10_predictions_list');
+                    setPendingPredictionIds([]);
+                    setPredictionsList([]);
+                  }
+                }}
+                className="text-xs bg-white text-red-500 px-3 py-1 rounded-lg font-bold border border-red-100 hover:bg-red-50 transition-colors"
+              >
+                Limpar Carrinho
+              </button>
             </div>
           )}
 
