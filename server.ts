@@ -7,12 +7,60 @@ import * as bcrypt from 'bcryptjs';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { supabase } from './src/supabase.js';
+import { WebSocketServer, WebSocket } from 'ws';
+import { createServer } from 'http';
 
 dotenv.config();
 
 const app = express();
+const httpServer = createServer(app);
 const PORT = 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'bolao10-secret-key-2024';
+
+// WebSocket Server
+const wss = new WebSocketServer({ server: httpServer });
+const clients = new Map<string, WebSocket>();
+
+const sendRealtimeNotification = (userId: string | 'all', notification: any) => {
+  const payload = JSON.stringify(notification);
+  if (userId === 'all') {
+    clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(payload);
+      }
+    });
+  } else {
+    const client = clients.get(userId.toString());
+    if (client && client.readyState === WebSocket.OPEN) {
+      client.send(payload);
+    }
+  }
+};
+
+wss.on('connection', (ws, req) => {
+  let userId: string | null = null;
+
+  ws.on('message', (message) => {
+    try {
+      const data = JSON.parse(message.toString());
+      if (data.type === 'auth' && data.token) {
+        const decoded = jwt.verify(data.token, JWT_SECRET) as any;
+        userId = decoded.id.toString();
+        clients.set(userId, ws);
+        console.log(`User ${userId} connected via WebSocket`);
+      }
+    } catch (err) {
+      console.error('WS Auth error:', err);
+    }
+  });
+
+  ws.on('close', () => {
+    if (userId) {
+      clients.delete(userId);
+      console.log(`User ${userId} disconnected from WebSocket`);
+    }
+  });
+});
 
 // Ensure uploads directory exists
 const uploadsDir = process.env.VERCEL ? '/tmp/uploads' : path.resolve(process.cwd(), 'uploads');
@@ -141,7 +189,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       user_name: user.name,
       user_email: user.email,
       user_phone: user.phone,
-      date: new Date().toISOString(),
+      created_at: new Date().toISOString(),
       message: `O usuário ${user.name} (@${user.nickname}) solicitou recuperação de senha.`
     });
 
@@ -465,7 +513,28 @@ app.get('/api/my-notifications', authenticate, async (req: any, res) => {
       if (historySetting?.value) jackpotHistory = JSON.parse(historySetting.value);
     } catch (e) {}
 
+    const { data: adminNotificationsSetting } = await supabase.from('settings').select('value').eq('key', 'admin_notifications').maybeSingle();
+    let adminNotifications: any[] = [];
+    try {
+      if (adminNotificationsSetting?.value) adminNotifications = JSON.parse(adminNotificationsSetting.value);
+    } catch (e) {}
+
     const notifications: any[] = [];
+    
+    // Add manual admin notifications
+    adminNotifications.forEach((msg: any) => {
+      if (msg.target_type === 'all' || (msg.target_type === 'individual' && msg.user_id === req.user.id)) {
+        notifications.push({
+          id: msg.id,
+          type: 'admin_msg',
+          title: msg.title,
+          message: msg.message,
+          msgType: msg.type, // info, warning, success, alert
+          createdAt: msg.created_at
+        });
+      }
+    });
+
     const processedRounds = new Set();
 
     predictions?.forEach((p: any) => {
@@ -582,6 +651,19 @@ app.post('/api/predictions', authenticate, upload.single('proof'), async (req: a
     }
 
     res.json({ success: true, ids: createdIds });
+
+    // Broadcast real-time notification
+    sendRealtimeNotification('all', {
+      type: 'notification',
+      data: {
+        id: `pred-${Date.now()}`,
+        type: 'admin_msg', // For UI consistency
+        msgType: 'info',
+        title: '⚽ Novo Palpite!',
+        message: `${req.user.name} (@${req.user.nickname}) acabou de enviar um palpite!`,
+        created_at: new Date().toISOString()
+      }
+    });
   } catch (err: any) {
     console.error('Prediction submission error:', err);
     res.status(500).json({ error: err.message || 'Falha ao enviar palpite' });
@@ -614,6 +696,102 @@ app.post('/api/predictions/attach-proof', authenticate, upload.single('proof'), 
   } catch (err: any) {
     console.error('Attach proof error:', err);
     res.status(500).json({ error: err.message || 'Erro ao enviar comprovante' });
+  }
+});
+
+app.post('/api/admin/send-notification', authenticate, isAdmin, async (req: any, res) => {
+  try {
+    const { title, message, type, target_type, user_id } = req.body;
+    
+    if (!title || !message) {
+      return res.status(400).json({ error: 'Título e mensagem são obrigatórios' });
+    }
+
+    const { data: setting } = await supabase.from('settings').select('value').eq('key', 'admin_notifications').maybeSingle();
+    let notifications = [];
+    if (setting?.value) {
+      try {
+        notifications = JSON.parse(setting.value);
+      } catch (e) {
+        notifications = [];
+      }
+    }
+
+    const newNotification = {
+      id: `admin-msg-${Date.now()}`,
+      title,
+      message,
+      type: type || 'info',
+      target_type: target_type || 'all',
+      user_id: target_type === 'individual' ? user_id : null,
+      created_at: new Date().toISOString(),
+      sender_id: req.user.id
+    };
+
+    notifications.unshift(newNotification); // Newest first
+    
+    // Keep only last 100 notifications to avoid hitting Supabase cell limit
+    if (notifications.length > 100) notifications = notifications.slice(0, 100);
+
+    const { error } = await supabase
+      .from('settings')
+      .upsert({ key: 'admin_notifications', value: JSON.stringify(notifications) }, { onConflict: 'key' });
+
+    if (error) throw error;
+
+    // Send real-time notification
+    sendRealtimeNotification(target_type === 'all' ? 'all' : user_id, {
+      type: 'notification',
+      data: {
+        ...newNotification,
+        type: 'admin_msg', // For frontend compatibility
+        msgType: type || 'info'
+      }
+    });
+
+    res.json({ success: true, notification: newNotification });
+  } catch (err: any) {
+    console.error('Send notification error:', err);
+    res.status(500).json({ error: 'Erro ao enviar notificação' });
+  }
+});
+
+app.get('/api/admin/notifications', authenticate, isAdmin, async (req, res) => {
+  try {
+    const { data: setting } = await supabase.from('settings').select('value').eq('key', 'admin_notifications').maybeSingle();
+    let notifications = [];
+    if (setting?.value) {
+      try {
+        notifications = JSON.parse(setting.value);
+      } catch (e) {
+        notifications = [];
+      }
+    }
+    res.json(notifications);
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao buscar notificações' });
+  }
+});
+
+app.delete('/api/admin/notifications/:id', authenticate, isAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data: setting } = await supabase.from('settings').select('value').eq('key', 'admin_notifications').maybeSingle();
+    
+    if (setting?.value) {
+      let notifications = JSON.parse(setting.value);
+      notifications = notifications.filter((n: any) => n.id !== id);
+      
+      const { error } = await supabase
+        .from('settings')
+        .upsert({ key: 'admin_notifications', value: JSON.stringify(notifications) }, { onConflict: 'key' });
+        
+      if (error) throw error;
+    }
+    
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao excluir notificação' });
   }
 });
 
@@ -716,7 +894,8 @@ app.get('/api/admin/financial-details', authenticate, isAdmin, async (req, res) 
     res.json({
       jackpotPool: parseFloat(jackpot?.value || '0'),
       prizesHistory: prizes?.value ? JSON.parse(prizes.value) : [],
-      withdrawalsHistory: withdrawals?.value ? JSON.parse(withdrawals.value) : []
+      withdrawalsHistory: withdrawals?.value ? JSON.parse(withdrawals.value) : [],
+      notifications: [] // Placeholder or fetch if needed, but App.tsx now uses /api/admin/notifications
     });
   } catch (err) {
     res.status(500).json({ error: 'Falha ao carregar detalhes financeiros' });
@@ -987,6 +1166,19 @@ app.post('/api/admin/rounds/:id/finish', authenticate, isAdmin, async (req, res)
       });
       
       await supabase.from('settings').upsert({ key: 'prizes_history', value: JSON.stringify(prizesHistory) }, { onConflict: 'key' });
+
+      // Broadcast real-time notification
+      sendRealtimeNotification('all', {
+        type: 'notification',
+        data: {
+          id: `win-${Date.now()}`,
+          type: 'admin_msg', // Use admin_msg to reuse frontend UI
+          msgType: 'success',
+          title: '🎉 Temos Ganhadores!',
+          message: `A Rodada #${round.number} foi finalizada. Ganhadores: ${winners.join(', ')}`,
+          created_at: new Date().toISOString()
+        }
+      });
     }
 
     if (jackpotWinnerNames) {
@@ -1027,7 +1219,7 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }

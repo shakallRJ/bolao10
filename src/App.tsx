@@ -31,7 +31,10 @@ import {
   Mail,
   MessageCircle,
   Eye,
-  EyeOff
+  EyeOff,
+  Send,
+  Trash2,
+  CheckCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -43,6 +46,13 @@ import QRCode from 'react-qr-code';
 import { generatePixPayload } from './utils/pix';
 
 // --- COMPONENTS ---
+
+const formatDate = (date: any, formatStr: string, options?: any) => {
+  if (!date) return '-';
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return '-';
+  return format(d, formatStr, options);
+};
 
 const NotificationsDropdown = () => {
   const { token } = useAuth();
@@ -82,8 +92,55 @@ const NotificationsDropdown = () => {
     };
     
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 60000); // Check every minute
-    return () => clearInterval(interval);
+
+    // Request Notification Permissions
+    if (Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+
+    // WebSocket Connection
+    if (token) {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}`;
+      const ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'auth', token }));
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          if (message.type === 'notification') {
+            const newNotif = message.data;
+            setNotifications(prev => {
+              // Avoid duplicates
+              if (prev.some(n => n.id === newNotif.id)) return prev;
+              const updated = [newNotif, ...prev];
+              
+              // Update unread count
+              const readIds = JSON.parse(localStorage.getItem('read_notifications') || '[]');
+              if (!readIds.includes(newNotif.id)) {
+                setUnreadCount(c => c + 1);
+              }
+              
+              return updated;
+            });
+
+            // Optional: Play a sound or show a browser notification
+            if (Notification.permission === 'granted') {
+              new Notification(newNotif.title, { body: newNotif.message });
+            }
+          }
+        } catch (err) {
+          console.error('WS Message error:', err);
+        }
+      };
+
+      return () => {
+        ws.close();
+      };
+    }
   }, [token]);
 
   const handleOpen = () => {
@@ -133,19 +190,44 @@ const NotificationsDropdown = () => {
                 </div>
               ) : (
                 <div className="divide-y divide-gray-100">
-                  {notifications.map((notif) => (
-                    <div key={notif.id} className="p-4 hover:bg-gray-50 transition-colors">
-                      <div className="flex items-start space-x-3">
-                        <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                          <Trophy className="w-5 h-5 text-green-600" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-bold text-gray-900">{notif.title}</p>
-                          <p className="text-sm text-gray-600 mt-0.5 leading-snug">{notif.message}</p>
+                  {notifications.map((notif) => {
+                    const isAdminMsg = notif.type === 'admin_msg';
+                    const iconColor = isAdminMsg ? (
+                      notif.msgType === 'success' ? 'bg-green-100 text-green-600' :
+                      notif.msgType === 'warning' ? 'bg-yellow-100 text-yellow-600' :
+                      (notif.msgType === 'alert' || notif.msgType === 'error') ? 'bg-red-100 text-red-600' :
+                      'bg-blue-100 text-blue-600'
+                    ) : 'bg-green-100 text-green-600';
+
+                    const Icon = isAdminMsg ? (
+                      (notif.msgType === 'alert' || notif.msgType === 'error') ? AlertCircle :
+                      notif.msgType === 'warning' ? Info :
+                      notif.msgType === 'success' ? CheckCircle :
+                      Bell
+                    ) : Trophy;
+
+                    return (
+                      <div key={notif.id} className="p-4 hover:bg-gray-50 transition-colors">
+                        <div className="flex items-start space-x-3">
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${iconColor}`}>
+                            <Icon className="w-5 h-5" />
+                          </div>
+                          <div className="flex-1">
+                            <p className="text-sm font-bold text-gray-900">{notif.title}</p>
+                            <p className="text-sm text-gray-600 mt-0.5 leading-snug">{notif.message}</p>
+                            <div className="flex items-center justify-between mt-2">
+                              {isAdminMsg && (
+                                <p className="text-[10px] text-gray-400 uppercase font-bold">Aviso Oficial</p>
+                              )}
+                              {notif.createdAt && (
+                                <p className="text-[10px] text-gray-400">{formatDate(notif.createdAt, 'dd/MM HH:mm')}</p>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -685,7 +767,7 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
                     <div>
                       <p className="font-bold text-orange-800">Rodada #{p.rounds?.number}</p>
                       <p className="text-sm text-orange-600">Aguardando validação do comprovante.</p>
-                      <p className="text-xs text-orange-500 mt-1">Enviado em: {format(new Date(p.created_at), 'dd/MM/yyyy HH:mm')}</p>
+                      <p className="text-xs text-orange-500 mt-1">Enviado em: {formatDate(p.created_at, 'dd/MM/yyyy HH:mm')}</p>
                     </div>
                     <div className="w-full md:w-auto">
                       <div className="flex flex-col space-y-2">
@@ -1035,7 +1117,7 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
               <div className="space-y-4">
                 <div className="flex items-center text-sm text-gray-600">
                   <Clock className="w-4 h-4 mr-2" />
-                  Início: {format(new Date(currentRound.start_time), "dd 'de' MMMM 'às' HH:mm", { locale: ptBR })}
+                  Início: {formatDate(currentRound.start_time, "dd 'de' MMMM 'às' HH:mm", { locale: ptBR })}
                 </div>
                 <div className="p-4 bg-gray-50 rounded-2xl flex justify-between items-center">
                   <div>
@@ -1076,7 +1158,7 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
                       </div>
                       <div>
                         <p className="font-bold text-primary">Rodada #{pred.round_number}</p>
-                        <p className="text-xs text-gray-500">{format(new Date(pred.created_at), 'dd/MM/yyyy HH:mm')}</p>
+                        <p className="text-xs text-gray-500">{formatDate(pred.created_at, 'dd/MM/yyyy HH:mm')}</p>
                       </div>
                     </div>
                     <div className="flex items-center space-x-4">
@@ -1593,11 +1675,22 @@ const AdminDashboard = () => {
   const [newWithdrawal, setNewWithdrawal] = useState({ amount: '', reason: '' });
   const [showWithdrawalForm, setShowWithdrawalForm] = useState(false);
   const [adminNotifications, setAdminNotifications] = useState<any[]>([]);
+  const [sentNotifications, setSentNotifications] = useState<any[]>([]);
   const [viewingPrediction, setViewingPrediction] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [viewingProof, setViewingProof] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'pending' | 'rounds' | 'users' | 'financial' | 'history' | 'notifications'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'rounds' | 'users' | 'financial' | 'history' | 'notifications' | 'messages'>('pending');
   const [roundHistory, setRoundHistory] = useState<any[]>([]);
+  
+  // Notification Form State
+  const [notificationForm, setNotificationForm] = useState({
+    title: '',
+    message: '',
+    type: 'info',
+    target_type: 'all',
+    user_id: ''
+  });
+  const [sendingNotification, setSendingNotification] = useState(false);
   
   // Create Round State
   const [newRound, setNewRound] = useState({
@@ -1676,26 +1769,28 @@ const AdminDashboard = () => {
     setRoundHistory(data);
   };
 
-  const fetchAdminNotifications = async () => {
-    const res = await fetch('/api/admin/financial-details', { // We can reuse this or create a new one, but let's check if there's a better way
+  const fetchNotifications = async () => {
+    const res = await fetch('/api/admin/notifications', { 
       headers: { 'Authorization': `Bearer ${token}` }
     });
-    // Actually, let's just fetch from a new endpoint or reuse financial-details if I update it
+    if (res.ok) {
+      setAdminNotifications(await res.json());
+    }
   };
 
-  // I'll update server.ts to include notifications in financial-details or create a new endpoint
-  const fetchNotifications = async () => {
+  const fetchSentNotifications = async () => {
     const res = await fetch('/api/admin/notifications', {
       headers: { 'Authorization': `Bearer ${token}` }
     });
-    if (res.ok) setAdminNotifications(await res.json());
+    if (res.ok) setSentNotifications(await res.json());
   };
 
   useEffect(() => { 
     setLoading(true);
     const promises = [fetchPending(), fetchCurrentRound()];
-    if (activeTab === 'users') promises.push(fetchUsers());
+    if (activeTab === 'users' || activeTab === 'messages') promises.push(fetchUsers());
     if (activeTab === 'notifications') promises.push(fetchNotifications());
+    if (activeTab === 'messages') promises.push(fetchSentNotifications());
     if (activeTab === 'financial') {
       promises.push(fetchFinancials());
       promises.push(fetchFinancialDetails());
@@ -1782,6 +1877,54 @@ const AdminDashboard = () => {
     if (res.ok) fetchUsers();
   };
 
+  const handleSendNotification = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSendingNotification(true);
+    try {
+      const res = await fetch('/api/admin/send-notification', {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(notificationForm)
+      });
+      if (res.ok) {
+        alert('Notificação enviada com sucesso!');
+        setNotificationForm({
+          title: '',
+          message: '',
+          type: 'info',
+          target_type: 'all',
+          user_id: ''
+        });
+        fetchSentNotifications();
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Erro ao enviar notificação');
+      }
+    } catch (err) {
+      alert('Erro de conexão');
+    } finally {
+      setSendingNotification(false);
+    }
+  };
+
+  const handleDeleteNotification = async (id: string) => {
+    if (!confirm('Deseja excluir esta mensagem do histórico?')) return;
+    try {
+      const res = await fetch(`/api/admin/notifications/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        fetchSentNotifications();
+      }
+    } catch (err) {
+      alert('Erro ao excluir');
+    }
+  };
+
   if (loading) return <div className="p-8">Carregando...</div>;
 
   return (
@@ -1795,7 +1938,8 @@ const AdminDashboard = () => {
             { id: 'users', label: 'Usuários' },
             { id: 'financial', label: 'Financeiro' },
             { id: 'history', label: 'Histórico' },
-            { id: 'notifications', label: 'Alertas' }
+            { id: 'notifications', label: 'Alertas' },
+            { id: 'messages', label: 'Mensagens' }
           ].map(tab => (
             <button 
               key={tab.id}
@@ -1834,7 +1978,7 @@ const AdminDashboard = () => {
                       {p.user_phone && <p className="text-xs text-gray-500">{p.user_phone}</p>}
                     </td>
                     <td className="px-6 py-4 font-medium">#{p.round_number}</td>
-                    <td className="px-6 py-4 text-sm text-gray-500">{format(new Date(p.created_at), 'dd/MM HH:mm')}</td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{formatDate(p.created_at, 'dd/MM HH:mm')}</td>
                     <td className="px-6 py-4">
                       <button 
                         onClick={() => setViewingPrediction(p)}
@@ -2109,7 +2253,7 @@ const AdminDashboard = () => {
                       <div>
                         <p className="font-bold text-gray-900">{n.message}</p>
                         <p className="text-sm text-gray-500 mt-1">
-                          Solicitado em {format(new Date(n.date), 'dd/MM/yyyy HH:mm')}
+                          Solicitado em {formatDate(n.created_at || n.date, 'dd/MM/yyyy HH:mm')}
                         </p>
                         <div className="mt-4 flex flex-wrap gap-2">
                           <a 
@@ -2135,6 +2279,144 @@ const AdminDashboard = () => {
                 </div>
               ))
             )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'messages' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-1">
+            <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm sticky top-8">
+              <h3 className="text-xl font-bold text-primary mb-6">Enviar Notificação</h3>
+              <form onSubmit={handleSendNotification} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Título</label>
+                  <input 
+                    type="text" 
+                    required 
+                    value={notificationForm.title}
+                    onChange={(e) => setNotificationForm({...notificationForm, title: e.target.value})}
+                    className="w-full px-4 py-2 rounded-xl border border-gray-200"
+                    placeholder="Ex: Nova Rodada Aberta!"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Mensagem</label>
+                  <textarea 
+                    required 
+                    rows={4}
+                    value={notificationForm.message}
+                    onChange={(e) => setNotificationForm({...notificationForm, message: e.target.value})}
+                    className="w-full px-4 py-2 rounded-xl border border-gray-200 resize-none"
+                    placeholder="Digite o conteúdo da mensagem..."
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Tipo de Alerta</label>
+                  <select 
+                    value={notificationForm.type}
+                    onChange={(e) => setNotificationForm({...notificationForm, type: e.target.value})}
+                    className="w-full px-4 py-2 rounded-xl border border-gray-200"
+                  >
+                    <option value="info">ℹ️ Informação (Azul)</option>
+                    <option value="success">✅ Sucesso (Verde)</option>
+                    <option value="warning">⚠️ Aviso (Amarelo)</option>
+                    <option value="error">❌ Erro / Crítico (Vermelho)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Destinatário</label>
+                  <select 
+                    value={notificationForm.target_type}
+                    onChange={(e) => setNotificationForm({...notificationForm, target_type: e.target.value})}
+                    className="w-full px-4 py-2 rounded-xl border border-gray-200"
+                  >
+                    <option value="all">Todos os Usuários</option>
+                    <option value="individual">Usuário Específico</option>
+                  </select>
+                </div>
+                {notificationForm.target_type === 'individual' && (
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Selecionar Usuário</label>
+                    <select 
+                      required
+                      value={notificationForm.user_id}
+                      onChange={(e) => setNotificationForm({...notificationForm, user_id: e.target.value})}
+                      className="w-full px-4 py-2 rounded-xl border border-gray-200"
+                    >
+                      <option value="">Selecione um usuário...</option>
+                      {users.map(u => (
+                        <option key={u.id} value={u.id}>{u.name} (@{u.nickname})</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <button 
+                  type="submit" 
+                  disabled={sendingNotification}
+                  className="w-full bg-primary text-white py-3 rounded-xl font-bold mt-4 hover:shadow-lg transition-all disabled:opacity-50 flex items-center justify-center"
+                >
+                  {sendingNotification ? 'Enviando...' : (
+                    <>
+                      <Send className="w-4 h-4 mr-2" /> Enviar Agora
+                    </>
+                  )}
+                </button>
+              </form>
+            </div>
+          </div>
+          
+          <div className="lg:col-span-2">
+            <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+              <div className="p-6 border-b border-gray-100 bg-gray-50">
+                <h3 className="font-bold text-primary">Histórico de Mensagens Enviadas</h3>
+              </div>
+              <div className="divide-y divide-gray-100">
+                {sentNotifications.length === 0 ? (
+                  <div className="p-12 text-center text-gray-400 italic">
+                    Nenhuma mensagem enviada ainda.
+                  </div>
+                ) : (
+                  sentNotifications.map((n) => (
+                    <div key={n.id} className="p-6 hover:bg-gray-50 transition-colors group">
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="flex items-center">
+                          <span className={`w-2 h-2 rounded-full mr-2 ${
+                            n.type === 'success' ? 'bg-green-500' : 
+                            n.type === 'warning' ? 'bg-yellow-500' : 
+                            (n.type === 'alert' || n.type === 'error') ? 'bg-red-500' : 'bg-blue-500'
+                          }`} />
+                          <h4 className="font-bold text-primary">{n.title}</h4>
+                        </div>
+                        <div className="flex items-center space-x-3">
+                          <span className="text-xs text-gray-400">
+                            {formatDate(n.created_at, 'dd/MM/yyyy HH:mm')}
+                          </span>
+                          <button 
+                            onClick={() => handleDeleteNotification(n.id)}
+                            className="text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                            title="Excluir mensagem"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-sm text-gray-600 mb-3">{n.message}</p>
+                      <div className="flex items-center text-[10px] font-bold uppercase tracking-wider">
+                        <span className="text-gray-400 mr-2">Para:</span>
+                        {n.target_type === 'all' ? (
+                          <span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded">Todos</span>
+                        ) : (
+                          <span className="bg-purple-50 text-purple-600 px-2 py-0.5 rounded">
+                            Individual (ID: {n.user_id})
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -2227,7 +2509,7 @@ const AdminDashboard = () => {
                           <td className="px-6 py-4 font-bold text-primary">#{p.round_number}</td>
                           <td className="px-6 py-4 text-sm text-gray-900">{p.winner_name}</td>
                           <td className="px-6 py-4 text-sm font-bold text-green-600">R$ {p.amount.toFixed(2)}</td>
-                          <td className="px-6 py-4 text-xs text-gray-500">{format(new Date(p.date), 'dd/MM/yy HH:mm')}</td>
+                          <td className="px-6 py-4 text-xs text-gray-500">{formatDate(p.date, 'dd/MM/yy HH:mm')}</td>
                         </tr>
                       ))
                     )}
@@ -2300,7 +2582,7 @@ const AdminDashboard = () => {
                     ) : (
                       financialDetails.withdrawalsHistory.map((w: any, idx: number) => (
                         <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                          <td className="px-6 py-4 text-xs text-gray-500">{format(new Date(w.date), 'dd/MM/yy HH:mm')}</td>
+                          <td className="px-6 py-4 text-xs text-gray-500">{formatDate(w.date, 'dd/MM/yy HH:mm')}</td>
                           <td className="px-6 py-4 text-sm text-gray-900">{w.reason}</td>
                           <td className="px-6 py-4 text-sm font-bold text-red-600">- R$ {w.amount.toFixed(2)}</td>
                         </tr>
@@ -2381,7 +2663,7 @@ const AdminDashboard = () => {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-500">
-                        {r.start_time ? format(new Date(r.start_time), 'dd/MM/yyyy HH:mm') : '-'}
+                        {formatDate(r.start_time, 'dd/MM/yyyy HH:mm')}
                       </td>
                       <td className="px-6 py-4 text-sm font-medium text-blue-600">
                         R$ {r.total_collected?.toFixed(2) || '0.00'}
@@ -2617,7 +2899,7 @@ const TransparencyPage = () => {
     doc.text(`BOLÃO10 - Transparência Rodada #${round?.number || ''}`, 14, 20);
     
     doc.setFontSize(11);
-    doc.text(`Data de Início: ${round?.start_time ? format(new Date(round.start_time), 'dd/MM/yyyy HH:mm') : '-'}`, 14, 30);
+    doc.text(`Data de Início: ${formatDate(round?.start_time, 'dd/MM/yyyy HH:mm')}`, 14, 30);
     doc.text(`Status: ${round?.status === 'open' ? 'Aberta' : round?.status === 'finished' ? 'Finalizada' : 'Fechada'}`, 14, 35);
     
     if (round?.status === 'finished') {
