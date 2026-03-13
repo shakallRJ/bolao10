@@ -25,11 +25,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
-    const savedToken = localStorage.getItem('bolao10_token');
-    const savedUser = localStorage.getItem('bolao10_user');
-    if (savedToken && savedUser) {
-      setToken(savedToken);
-      setUser(JSON.parse(savedUser));
+    try {
+      const savedToken = localStorage.getItem('bolao10_token');
+      const savedUser = localStorage.getItem('bolao10_user');
+      if (savedToken && savedUser) {
+        setToken(savedToken);
+        setUser(JSON.parse(savedUser));
+      }
+    } catch (err) {
+      console.error('Auth initialization error:', err);
+      localStorage.removeItem('bolao10_token');
+      localStorage.removeItem('bolao10_user');
     }
   }, []);
 

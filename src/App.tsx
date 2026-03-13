@@ -45,12 +45,21 @@ import { Download } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { generatePixPayload } from './utils/pix';
 
-// --- COMPONENTS ---
+// --- HELPERS ---
+
+const parseDate = (date: any) => {
+  if (!date) return null;
+  if (typeof date === 'string') {
+    // Safari compatibility: replace space with T for ISO-like strings
+    return new Date(date.replace(' ', 'T'));
+  }
+  return new Date(date);
+};
 
 const formatDate = (date: any, formatStr: string, options?: any) => {
   if (!date) return '-';
-  const d = new Date(date);
-  if (isNaN(d.getTime())) return '-';
+  const d = parseDate(date);
+  if (!d || isNaN(d.getTime())) return '-';
   return format(d, formatStr, options);
 };
 
@@ -82,7 +91,12 @@ const NotificationsDropdown = () => {
           const data = await res.json();
           setNotifications(data);
           
-          const readIds = JSON.parse(localStorage.getItem('read_notifications') || '[]');
+          let readIds = [];
+          try {
+            readIds = JSON.parse(localStorage.getItem('read_notifications') || '[]');
+          } catch (e) {
+            readIds = [];
+          }
           const unread = data.filter((n: any) => !readIds.includes(n.id));
           setUnreadCount(unread.length);
         }
@@ -94,8 +108,10 @@ const NotificationsDropdown = () => {
     fetchNotifications();
 
     // Request Notification Permissions
-    if (Notification.permission === 'default') {
-      Notification.requestPermission();
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      if (Notification.permission === 'default') {
+        Notification.requestPermission();
+      }
     }
 
     // WebSocket Connection
@@ -119,7 +135,12 @@ const NotificationsDropdown = () => {
               const updated = [newNotif, ...prev];
               
               // Update unread count
-              const readIds = JSON.parse(localStorage.getItem('read_notifications') || '[]');
+              let readIds = [];
+              try {
+                readIds = JSON.parse(localStorage.getItem('read_notifications') || '[]');
+              } catch (e) {
+                readIds = [];
+              }
               if (!readIds.includes(newNotif.id)) {
                 setUnreadCount(c => c + 1);
               }
@@ -128,7 +149,7 @@ const NotificationsDropdown = () => {
             });
 
             // Optional: Play a sound or show a browser notification
-            if (Notification.permission === 'granted') {
+            if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
               new Notification(newNotif.title, { body: newNotif.message });
             }
           }
@@ -146,7 +167,12 @@ const NotificationsDropdown = () => {
   const handleOpen = () => {
     setIsOpen(!isOpen);
     if (!isOpen && unreadCount > 0) {
-      const readIds = JSON.parse(localStorage.getItem('read_notifications') || '[]');
+      let readIds = [];
+      try {
+        readIds = JSON.parse(localStorage.getItem('read_notifications') || '[]');
+      } catch (e) {
+        readIds = [];
+      }
       const newReadIds = [...new Set([...readIds, ...notifications.map(n => n.id)])];
       localStorage.setItem('read_notifications', JSON.stringify(newReadIds));
       setUnreadCount(0);
@@ -1279,12 +1305,20 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
   const [round, setRound] = useState<any>(null);
   const [guesses, setGuesses] = useState<Record<number, string>>({});
   const [predictionsList, setPredictionsList] = useState<Record<number, string>[]>(() => {
-    const saved = localStorage.getItem('bolao10_predictions_list');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('bolao10_predictions_list');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
   });
   const [step, setStep] = useState(() => {
-    const saved = localStorage.getItem('bolao10_prediction_step');
-    return saved ? parseInt(saved) : 1;
+    try {
+      const saved = localStorage.getItem('bolao10_prediction_step');
+      return saved ? parseInt(saved) : 1;
+    } catch (e) {
+      return 1;
+    }
   }); // 1: Palpites, 2: Pagamento
 
   useEffect(() => {
@@ -1301,8 +1335,12 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
   const [copied, setCopied] = useState(false);
   const [showDeadlinePopup, setShowDeadlinePopup] = useState(false);
   const [pendingPredictionIds, setPendingPredictionIds] = useState<number[]>(() => {
-    const saved = localStorage.getItem('bolao10_pending_ids');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('bolao10_pending_ids');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
   });
 
   useEffect(() => {
@@ -1333,7 +1371,7 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
           localStorage.setItem('bolao10_current_round_id', data.id.toString());
         }
 
-        if (data && data.start_time && new Date() > new Date(data.start_time)) {
+        if (data && data.start_time && new Date() > (parseDate(data.start_time) || new Date(0))) {
           setShowDeadlinePopup(true);
         }
       })
@@ -1344,7 +1382,7 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
   }, []);
 
   const handleGuess = (gameId: number, guess: string) => {
-    if (round && round.start_time && new Date() > new Date(round.start_time)) {
+    if (round && round.start_time && new Date() > (parseDate(round.start_time) || new Date(0))) {
       setShowDeadlinePopup(true);
       return;
     }
@@ -1381,7 +1419,7 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
   };
 
   const handleAddPrediction = async () => {
-    if (round && round.start_time && new Date() > new Date(round.start_time)) {
+    if (round && round.start_time && new Date() > (parseDate(round.start_time) || new Date(0))) {
       setShowDeadlinePopup(true);
       return;
     }
@@ -1400,7 +1438,7 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
   };
 
   const handleProceedToPayment = async () => {
-    if (round && round.start_time && new Date() > new Date(round.start_time)) {
+    if (round && round.start_time && new Date() > (parseDate(round.start_time) || new Date(0))) {
       setShowDeadlinePopup(true);
       return;
     }
@@ -1422,7 +1460,7 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
   };
 
   const handleSubmit = async () => {
-    if (round && round.start_time && new Date() > new Date(round.start_time)) {
+    if (round && round.start_time && new Date() > (parseDate(round.start_time) || new Date(0))) {
       setShowDeadlinePopup(true);
       return;
     }
