@@ -830,10 +830,10 @@ app.get('/api/rounds/:id/check-prediction', authenticate, async (req: any, res) 
       .eq('round_id', req.params.id)
       .eq('user_id', req.user.id)
       .eq('status', 'approved')
-      .maybeSingle();
+      .limit(1);
 
     if (error) throw error;
-    res.json({ hasPrediction: !!data });
+    res.json({ hasPrediction: data && data.length > 0 });
   } catch (err) {
     res.status(500).json({ error: 'Erro ao verificar palpite' });
   }
