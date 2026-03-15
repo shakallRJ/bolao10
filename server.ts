@@ -1049,6 +1049,42 @@ app.post('/api/admin/predictions/:id/validate', authenticate, isAdmin, async (re
   res.json({ success: true });
 });
 
+app.post('/api/admin/rounds/:id/partial-results', authenticate, isAdmin, async (req, res) => {
+  const { results } = req.body;
+  
+  try {
+    // 1. Update game results
+    for (const gameId in results) {
+      if (results[gameId]) {
+        await supabase.from('games').update({ result: results[gameId] }).eq('id', gameId);
+      }
+    }
+
+    // 2. Recalculate scores
+    const { data: predictions } = await supabase
+      .from('predictions')
+      .select('id')
+      .eq('round_id', req.params.id)
+      .eq('status', 'approved');
+
+    if (predictions) {
+      for (const p of predictions) {
+        const { data: items } = await supabase.from('prediction_items').select('game_id, guess').eq('prediction_id', p.id);
+        let score = 0;
+        items?.forEach((item: any) => {
+          if (results[item.game_id] && results[item.game_id] === item.guess) score++;
+        });
+        await supabase.from('predictions').update({ score }).eq('id', p.id);
+      }
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Partial results error:', err);
+    res.status(500).json({ error: 'Failed to update partial results' });
+  }
+});
+
 app.post('/api/admin/rounds/:id/finish', authenticate, isAdmin, async (req, res) => {
   const { results, distributeJackpot } = req.body;
   

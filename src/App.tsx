@@ -34,7 +34,11 @@ import {
   EyeOff,
   Send,
   Trash2,
-  CheckCircle
+  CheckCircle,
+  Plus,
+  Edit,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -277,6 +281,7 @@ const Navbar = ({ onNavigate, currentPage }: { onNavigate: (page: string) => voi
     { id: 'ranking', label: 'Ranking', icon: BarChart2, show: !!user },
     { id: 'terms', label: 'Regras', icon: FileText, show: true },
     { id: 'admin', label: 'Admin', icon: ShieldCheck, show: isAdmin },
+    { id: 'admin-rounds', label: 'Gerenciar Rodadas', icon: ListOrdered, show: isAdmin },
   ];
 
   return (
@@ -1096,7 +1101,7 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
         <div className="lg:col-span-2 space-y-8">
           {/* Wallet Summary */}
           {walletData && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-3xl p-6 text-white shadow-md flex items-center justify-between">
                 <div>
                   <p className="text-green-100 font-medium mb-1">Total Ganho</p>
@@ -1104,6 +1109,15 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
                 </div>
                 <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
                   <TrendingUp className="w-6 h-6 text-white" />
+                </div>
+              </div>
+              <div className="bg-gradient-to-br from-amber-500 to-amber-600 rounded-3xl p-6 text-white shadow-md flex items-center justify-between">
+                <div>
+                  <p className="text-amber-100 font-medium mb-1">Bônus 10 Acertos</p>
+                  <p className="text-3xl font-bold">R$ {currentRound?.jackpotPool?.toFixed(2) || '0.00'}</p>
+                </div>
+                <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
+                  <Trophy className="w-6 h-6 text-white" />
                 </div>
               </div>
               <div className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm flex items-center justify-between cursor-pointer hover:shadow-md transition-all" onClick={() => onNavigate('wallet')}>
@@ -1147,8 +1161,8 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
                 </div>
                 <div className="p-4 bg-gray-50 rounded-2xl flex justify-between items-center">
                   <div>
-                    <p className="text-xs text-gray-500 uppercase font-bold tracking-wider">Bônus 10 Acertos</p>
-                    <p className="text-2xl font-bold text-secondary">R$ {currentRound.jackpotPool.toFixed(2)}</p>
+                    <p className="text-xs text-gray-500 uppercase font-bold tracking-wider">Valor do Palpite</p>
+                    <p className="text-2xl font-bold text-primary">R$ {currentRound.entry_value.toFixed(2)}</p>
                   </div>
                   <button 
                     onClick={() => onNavigate('predictions')}
@@ -1717,7 +1731,7 @@ const AdminDashboard = () => {
   const [viewingPrediction, setViewingPrediction] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [viewingProof, setViewingProof] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'pending' | 'rounds' | 'users' | 'financial' | 'history' | 'notifications' | 'messages'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'users' | 'financial' | 'history' | 'notifications' | 'messages'>('pending');
   const [roundHistory, setRoundHistory] = useState<any[]>([]);
   
   // Notification Form State
@@ -1730,21 +1744,8 @@ const AdminDashboard = () => {
   });
   const [sendingNotification, setSendingNotification] = useState(false);
   
-  // Create Round State
-  const [newRound, setNewRound] = useState({
-    number: '',
-    startTime: '',
-    entryValue: '10',
-    games: Array(10).fill({ home: '', away: '' })
-  });
-
   // Edit User State
   const [editingUser, setEditingUser] = useState<any>(null);
-
-  // Finish Round State
-  const [currentRound, setCurrentRound] = useState<any>(null);
-  const [results, setResults] = useState<Record<number, string>>({});
-  const [distributeJackpot, setDistributeJackpot] = useState(false);
 
   const fetchPending = async () => {
     const res = await fetch('/api/admin/pending-predictions', {
@@ -1795,12 +1796,6 @@ const AdminDashboard = () => {
     }
   };
 
-  const fetchCurrentRound = async () => {
-    const res = await fetch('/api/rounds/current');
-    const data = await res.json();
-    setCurrentRound(data);
-  };
-
   const fetchRoundHistory = async () => {
     const res = await fetch('/api/rounds');
     const data = await res.json();
@@ -1825,7 +1820,7 @@ const AdminDashboard = () => {
 
   useEffect(() => { 
     setLoading(true);
-    const promises = [fetchPending(), fetchCurrentRound()];
+    const promises = [fetchPending()];
     if (activeTab === 'users' || activeTab === 'messages') promises.push(fetchUsers());
     if (activeTab === 'notifications') promises.push(fetchNotifications());
     if (activeTab === 'messages') promises.push(fetchSentNotifications());
@@ -1847,46 +1842,6 @@ const AdminDashboard = () => {
       body: JSON.stringify({ status })
     });
     if (res.ok) fetchPending();
-  };
-
-  const handleCreateRound = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const res = await fetch('/api/admin/rounds', {
-      method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(newRound)
-    });
-    if (res.ok) {
-      alert('Rodada criada com sucesso!');
-      fetchCurrentRound();
-      setActiveTab('pending');
-    }
-  };
-
-  const handleFinishRound = async () => {
-    if (Object.keys(results).length < 10) return alert('Insira todos os resultados.');
-    
-    if (distributeJackpot) {
-      if (!confirm('Tem certeza que deseja ZERAR O ACUMULADO e distribuir para o(s) vencedor(es) desta rodada?')) return;
-    }
-
-    const res = await fetch(`/api/admin/rounds/${currentRound.id}/finish`, {
-      method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ results, distributeJackpot })
-    });
-    const data = await res.json();
-    if (res.ok) {
-      alert(`Rodada finalizada!\nPrêmio Vencedores: R$ ${data.summary.winnersPool.toFixed(2)}\nTaxa Admin: R$ ${data.summary.adminFee.toFixed(2)}${data.summary.jackpotPrizePaid > 0 ? `\nBônus Acumulado Distribuído: R$ ${data.summary.jackpotPrizePaid.toFixed(2)}` : ''}`);
-      fetchCurrentRound();
-      setDistributeJackpot(false);
-    }
   };
 
   const handleUpdateUser = async (e: React.FormEvent) => {
@@ -1972,7 +1927,6 @@ const AdminDashboard = () => {
         <div className="flex bg-gray-100 p-1 rounded-xl overflow-x-auto max-w-full">
           {[
             { id: 'pending', label: 'Validações' },
-            { id: 'rounds', label: 'Rodadas' },
             { id: 'users', label: 'Usuários' },
             { id: 'financial', label: 'Financeiro' },
             { id: 'history', label: 'Histórico' },
@@ -2054,143 +2008,6 @@ const AdminDashboard = () => {
               </tbody>
             </table>
           </div>
-        </div>
-      )}
-
-      {activeTab === 'rounds' && (
-        <div className="space-y-8">
-          <div className="flex justify-end">
-            <button 
-              onClick={() => setActiveTab('history')}
-              className="bg-gray-100 text-gray-700 px-6 py-2 rounded-xl font-bold hover:bg-gray-200 transition-all flex items-center"
-            >
-              <Clock className="w-4 h-4 mr-2" /> Histórico de Rodadas
-            </button>
-          </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* Create Round */}
-            <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm">
-            <h3 className="text-xl font-bold text-primary mb-6">Criar Nova Rodada</h3>
-            <form onSubmit={handleCreateRound} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Número da Rodada</label>
-                  <input 
-                    type="number" 
-                    required 
-                    value={newRound.number}
-                    onChange={(e) => setNewRound({...newRound, number: e.target.value})}
-                    className="w-full px-4 py-2 rounded-xl border border-gray-200"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Limite para Palpites (Data/Hora)</label>
-                  <input 
-                    type="datetime-local" 
-                    required 
-                    value={newRound.startTime}
-                    onChange={(e) => setNewRound({...newRound, startTime: e.target.value})}
-                    className="w-full px-4 py-2 rounded-xl border border-gray-200"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Valor de Entrada (R$)</label>
-                <input 
-                  type="number" 
-                  required 
-                  value={newRound.entryValue}
-                  onChange={(e) => setNewRound({...newRound, entryValue: e.target.value})}
-                  className="w-full px-4 py-2 rounded-xl border border-gray-200"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="block text-xs font-bold text-gray-500 uppercase">Jogos (10)</label>
-                {newRound.games.map((g, i) => (
-                  <div key={i} className="flex gap-2">
-                    <input 
-                      placeholder="Mandante" 
-                      required 
-                      value={g.home}
-                      onChange={(e) => {
-                        const games = [...newRound.games];
-                        games[i] = { ...games[i], home: e.target.value };
-                        setNewRound({ ...newRound, games });
-                      }}
-                      className="flex-1 px-3 py-1 text-sm rounded-lg border border-gray-200"
-                    />
-                    <span className="text-gray-400">x</span>
-                    <input 
-                      placeholder="Visitante" 
-                      required 
-                      value={g.away}
-                      onChange={(e) => {
-                        const games = [...newRound.games];
-                        games[i] = { ...games[i], away: e.target.value };
-                        setNewRound({ ...newRound, games });
-                      }}
-                      className="flex-1 px-3 py-1 text-sm rounded-lg border border-gray-200"
-                    />
-                  </div>
-                ))}
-              </div>
-              <button type="submit" className="w-full bg-primary text-white py-3 rounded-xl font-bold mt-4">Criar Rodada</button>
-            </form>
-          </div>
-
-          {/* Finish Round */}
-          <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm">
-            <h3 className="text-xl font-bold text-primary mb-6">Finalizar Rodada Atual</h3>
-            {currentRound ? (
-              <div className="space-y-4">
-                <p className="text-sm text-gray-600 mb-4">Insira os resultados finais para calcular os prêmios da Rodada #{currentRound.number}.</p>
-                {currentRound.games.map((game: any) => (
-                  <div key={game.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
-                    <span className="text-sm font-bold text-primary truncate flex-1">{game.home_team} x {game.away_team}</span>
-                    <div className="flex gap-1">
-                      {['1', 'X', '2'].map(opt => (
-                        <button
-                          key={opt}
-                          onClick={() => setResults({...results, [game.id]: opt})}
-                          className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${results[game.id] === opt ? 'bg-secondary text-white' : 'bg-white text-gray-400 border border-gray-200'}`}
-                        >
-                          {opt}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                
-                <div className="mt-6 mb-2 p-4 bg-yellow-50 border border-yellow-200 rounded-xl flex items-start gap-3">
-                  <input 
-                    type="checkbox" 
-                    id="distributeJackpot"
-                    checked={distributeJackpot}
-                    onChange={(e) => setDistributeJackpot(e.target.checked)}
-                    className="mt-1 w-5 h-5 text-secondary border-gray-300 rounded focus:ring-secondary"
-                  />
-                  <div>
-                    <label htmlFor="distributeJackpot" className="font-bold text-gray-800 cursor-pointer">
-                      Zerar Acumulado e Distribuir
-                    </label>
-                    <p className="text-xs text-gray-600 mt-1">
-                      Ao marcar esta opção, o prêmio acumulado (Bônus 10) será distribuído para o(s) vencedor(es) desta rodada, mesmo que não tenham acertado os 10 jogos. O pote acumulado será zerado.
-                    </p>
-                  </div>
-                </div>
-
-                <button 
-                  onClick={handleFinishRound}
-                  className="w-full bg-secondary text-white py-3 rounded-xl font-bold mt-4"
-                >
-                  Encerrar e Calcular Prêmios
-                </button>
-              </div>
-            ) : (
-              <p className="text-gray-500 italic">Nenhuma rodada ativa para finalizar.</p>
-            )}
-          </div>
-        </div>
         </div>
       )}
 
@@ -3098,6 +2915,366 @@ const TransparencyPage = () => {
   );
 };
 
+const AdminRoundsPage = () => {
+  const { token } = useAuth();
+  const [rounds, setRounds] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [editingRound, setEditingRound] = useState<any>(null);
+  const [partialResults, setPartialResults] = useState<Record<number, string>>({});
+  const [submitting, setSubmitting] = useState(false);
+
+  const [newRound, setNewRound] = useState({
+    number: '',
+    startTime: '',
+    entryValue: '10',
+    games: Array(10).fill({ home: '', away: '' })
+  });
+
+  const fetchRounds = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/rounds');
+      const data = await res.json();
+      setRounds(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRounds();
+  }, []);
+
+  const handleCreateRound = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/admin/rounds', {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(newRound)
+      });
+      if (res.ok) {
+        alert('Rodada criada com sucesso!');
+        setShowCreateForm(false);
+        setNewRound({
+          number: '',
+          startTime: '',
+          entryValue: '10',
+          games: Array(10).fill({ home: '', away: '' })
+        });
+        fetchRounds();
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Erro ao criar rodada');
+      }
+    } catch (err) {
+      alert('Erro na conexão');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSavePartialResults = async (roundId: number) => {
+    setSubmitting(true);
+    try {
+      const res = await fetch(`/api/admin/rounds/${roundId}/partial-results`, {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ results: partialResults })
+      });
+      if (res.ok) {
+        alert('Resultados parciais salvos e ranking atualizado!');
+        setEditingRound(null);
+        fetchRounds();
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Erro ao salvar resultados');
+      }
+    } catch (err) {
+      alert('Erro na conexão');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleFinishRound = async (roundId: number, distributeJackpot: boolean) => {
+    if (!confirm('Tem certeza que deseja FINALIZAR esta rodada? Esta ação é irreversível e calculará todos os prêmios.')) return;
+    
+    setSubmitting(true);
+    try {
+      const res = await fetch(`/api/admin/rounds/${roundId}/finish`, {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ results: partialResults, distributeJackpot })
+      });
+      if (res.ok) {
+        alert('Rodada finalizada com sucesso!');
+        setEditingRound(null);
+        fetchRounds();
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Erro ao finalizar rodada');
+      }
+    } catch (err) {
+      alert('Erro na conexão');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (loading && rounds.length === 0) return <div className="p-8">Carregando...</div>;
+
+  return (
+    <div className="max-w-6xl mx-auto px-4 py-8">
+      <div className="flex justify-between items-center mb-8">
+        <div>
+          <h1 className="text-3xl font-bold text-primary">Gerenciar Rodadas</h1>
+          <p className="text-gray-500">Crie, edite e finalize as rodadas do bolão.</p>
+        </div>
+        <button 
+          onClick={() => setShowCreateForm(!showCreateForm)}
+          className="bg-primary text-white px-6 py-3 rounded-xl font-bold hover:shadow-lg transition-all flex items-center"
+        >
+          {showCreateForm ? <X className="w-5 h-5 mr-2" /> : <Plus className="w-5 h-5 mr-2" />}
+          {showCreateForm ? 'Cancelar' : 'Nova Rodada'}
+        </button>
+      </div>
+
+      {showCreateForm && (
+        <motion.div 
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white p-8 rounded-[32px] border border-gray-100 shadow-sm mb-8"
+        >
+          <h2 className="text-xl font-bold text-primary mb-6">Configurar Nova Rodada</h2>
+          <form onSubmit={handleCreateRound} className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Número da Rodada</label>
+                <input 
+                  type="number" 
+                  required 
+                  value={newRound.number}
+                  onChange={(e) => setNewRound({...newRound, number: e.target.value})}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-secondary outline-none"
+                  placeholder="Ex: 15"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Limite para Palpites</label>
+                <input 
+                  type="datetime-local" 
+                  required 
+                  value={newRound.startTime}
+                  onChange={(e) => setNewRound({...newRound, startTime: e.target.value})}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-secondary outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Valor de Entrada (R$)</label>
+                <input 
+                  type="number" 
+                  required 
+                  value={newRound.entryValue}
+                  onChange={(e) => setNewRound({...newRound, entryValue: e.target.value})}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-secondary outline-none"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase mb-4">Jogos da Rodada (10)</label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {newRound.games.map((g, i) => (
+                  <div key={i} className="flex items-center gap-3 p-3 bg-gray-50 rounded-2xl border border-gray-100">
+                    <span className="text-xs font-bold text-gray-400 w-6">{i + 1}</span>
+                    <input 
+                      placeholder="Time Mandante" 
+                      required 
+                      value={g.home}
+                      onChange={(e) => {
+                        const games = [...newRound.games];
+                        games[i] = { ...games[i], home: e.target.value };
+                        setNewRound({ ...newRound, games });
+                      }}
+                      className="flex-1 px-3 py-2 text-sm rounded-lg border border-gray-200 outline-none focus:border-secondary"
+                    />
+                    <span className="text-gray-400 font-bold">x</span>
+                    <input 
+                      placeholder="Time Visitante" 
+                      required 
+                      value={g.away}
+                      onChange={(e) => {
+                        const games = [...newRound.games];
+                        games[i] = { ...games[i], away: e.target.value };
+                        setNewRound({ ...newRound, games });
+                      }}
+                      className="flex-1 px-3 py-2 text-sm rounded-lg border border-gray-200 outline-none focus:border-secondary"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <button 
+              type="submit" 
+              disabled={submitting}
+              className="w-full bg-primary text-white py-4 rounded-2xl font-bold text-lg hover:shadow-xl transition-all disabled:opacity-50"
+            >
+              {submitting ? 'Criando...' : 'Criar Rodada e Abrir para Palpites'}
+            </button>
+          </form>
+        </motion.div>
+      )}
+
+      <div className="space-y-6">
+        {rounds.map((round) => (
+          <div key={round.id} className="bg-white rounded-[32px] border border-gray-100 shadow-sm overflow-hidden">
+            <div className="p-6 flex flex-col md:flex-row justify-between items-center gap-4">
+              <div className="flex items-center gap-4">
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-bold text-xl ${round.status === 'open' ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
+                  #{round.number}
+                </div>
+                <div>
+                  <h3 className="font-bold text-primary text-lg">Rodada {round.number}</h3>
+                  <p className="text-sm text-gray-500">
+                    {round.status === 'open' ? 'Aberta para palpites' : round.status === 'closed' ? 'Em andamento' : 'Finalizada'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={async () => {
+                    if (editingRound?.id === round.id) {
+                      setEditingRound(null);
+                      return;
+                    }
+                    const res = await fetch(`/api/rounds/${round.id}`);
+                    const data = await res.json();
+                    setEditingRound(data);
+                    const initialResults: any = {};
+                    data.games.forEach((g: any) => {
+                      if (g.result) initialResults[g.id] = g.result;
+                    });
+                    setPartialResults(initialResults);
+                  }}
+                  className="px-4 py-2 rounded-xl border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-all"
+                >
+                  {editingRound?.id === round.id ? 'Fechar' : 'Gerenciar Resultados'}
+                </button>
+                {round.status === 'open' && (
+                  <span className="bg-green-100 text-green-600 px-3 py-1 rounded-lg text-xs font-bold uppercase">Ativa</span>
+                )}
+              </div>
+            </div>
+
+            {editingRound?.id === round.id && (
+              <motion.div 
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                className="px-6 pb-8 border-t border-gray-50 pt-6"
+              >
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  <div>
+                    <h4 className="font-bold text-primary mb-4 flex items-center">
+                      <Edit className="w-4 h-4 mr-2" /> Inserir Resultados
+                    </h4>
+                    <div className="space-y-3">
+                      {editingRound.games.map((game: any) => (
+                        <div key={game.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl border border-gray-100">
+                          <div className="flex-1 min-w-0 mr-4">
+                            <p className="text-sm font-bold text-primary truncate">{game.home_team} x {game.away_team}</p>
+                          </div>
+                          <div className="flex gap-1">
+                            {['1', 'X', '2'].map(opt => (
+                              <button
+                                key={opt}
+                                onClick={() => setPartialResults({...partialResults, [game.id]: opt})}
+                                className={`w-10 h-10 rounded-xl text-sm font-bold transition-all ${partialResults[game.id] === opt ? 'bg-secondary text-white shadow-md' : 'bg-white text-gray-400 border border-gray-100 hover:border-gray-300'}`}
+                              >
+                                {opt}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col justify-between">
+                    <div>
+                      <h4 className="font-bold text-primary mb-4">Ações da Rodada</h4>
+                      <div className="space-y-4">
+                        <div className="p-4 bg-blue-50 border border-blue-100 rounded-2xl">
+                          <p className="text-sm text-blue-800 font-medium mb-2">Resultados Parciais</p>
+                          <p className="text-xs text-blue-600 mb-4">Salve os resultados dos jogos que já terminaram para atualizar o ranking parcial em tempo real.</p>
+                          <button 
+                            onClick={() => handleSavePartialResults(round.id)}
+                            disabled={submitting}
+                            className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold text-sm hover:bg-blue-700 transition-all disabled:opacity-50"
+                          >
+                            Salvar Parciais e Atualizar Ranking
+                          </button>
+                        </div>
+
+                        {round.status !== 'finished' && (
+                          <div className="p-4 bg-red-50 border border-red-100 rounded-2xl">
+                            <p className="text-sm text-red-800 font-medium mb-2">Finalizar Rodada</p>
+                            <p className="text-xs text-red-600 mb-4">Encerra a rodada definitivamente, calcula os prêmios e distribui os saldos para os vencedores.</p>
+                            
+                            <div className="flex items-center gap-2 mb-4">
+                              <input 
+                                type="checkbox" 
+                                id={`jackpot-${round.id}`}
+                                className="w-4 h-4 text-red-600"
+                                onChange={(e) => (window as any).distributeJackpot = e.target.checked}
+                              />
+                              <label htmlFor={`jackpot-${round.id}`} className="text-xs font-bold text-red-800">Distribuir Bônus Acumulado</label>
+                            </div>
+
+                            <button 
+                              onClick={() => handleFinishRound(round.id, (window as any).distributeJackpot)}
+                              disabled={submitting}
+                              className="w-full bg-red-600 text-white py-3 rounded-xl font-bold text-sm hover:bg-red-700 transition-all disabled:opacity-50"
+                            >
+                              Finalizar e Pagar Prêmios
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <button 
+                      onClick={() => setEditingRound(null)}
+                      className="mt-8 text-gray-400 hover:text-gray-600 text-sm font-bold underline"
+                    >
+                      Fechar Painel de Gerenciamento
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const RankingPage = () => {
   const [rounds, setRounds] = useState<any[]>([]);
   const [selectedRoundId, setSelectedRoundId] = useState<string>('');
@@ -3179,15 +3356,14 @@ const RankingPage = () => {
                 </td>
                 <td className="px-8 py-5 font-bold text-primary">{item.user_name}</td>
                 <td className="px-8 py-5 text-right">
-                  {selectedRound?.status === 'finished' ? (
-                    <span className="bg-secondary text-white px-4 py-1 rounded-full font-bold">
+                  <div className="flex flex-col items-end">
+                    <span className={`${selectedRound?.status === 'finished' ? 'bg-secondary text-white' : 'bg-blue-100 text-blue-700'} px-4 py-1 rounded-full font-bold`}>
                       {item.score !== null && item.score !== undefined ? `${item.score} pts` : '0 pts'}
                     </span>
-                  ) : (
-                    <span className="bg-gray-100 text-gray-500 px-4 py-1 rounded-full font-bold text-sm">
-                      Em andamento
-                    </span>
-                  )}
+                    {selectedRound?.status !== 'finished' && (
+                      <span className="text-[10px] font-bold text-blue-500 uppercase mt-1">Parcial</span>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -3298,6 +3474,7 @@ export default function App() {
       case 'profile': return <ProfilePage onNavigate={setPage} />;
       case 'predictions': return <PredictionsPage onNavigate={setPage} />;
       case 'admin': return isAdmin ? <AdminDashboard /> : <Dashboard onNavigate={setPage} />;
+      case 'admin-rounds': return isAdmin ? <AdminRoundsPage /> : <Dashboard onNavigate={setPage} />;
       case 'transparency': return <TransparencyPage />;
       case 'ranking': return <RankingPage />;
       case 'terms': return <TermsPage />;
