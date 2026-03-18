@@ -1019,7 +1019,7 @@ const ProfilePage = ({ onNavigate }: { onNavigate: (page: string) => void }) => 
 };
 
 const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
-  const { token, user } = useAuth();
+  const { token, user, logout } = useAuth();
   const [currentRound, setCurrentRound] = useState<any>(null);
   const [myPredictions, setMyPredictions] = useState<any[]>([]);
   const [walletData, setWalletData] = useState<any>(null);
@@ -1041,6 +1041,11 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
           })
         ]);
         
+        if (roundRes.status === 401 || predRes.status === 401 || walletRes.status === 401) {
+          logout();
+          return;
+        }
+
         if (!roundRes.ok) {
           const errorData = await roundRes.json().catch(() => ({}));
           throw new Error(`Erro ao carregar rodada: ${errorData.error || roundRes.statusText}`);
@@ -1092,9 +1097,20 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-primary">Olá, {user?.nickname || user?.name}! 👋</h1>
-        <p className="text-gray-500">Bem-vindo de volta ao Bolão10.</p>
+      <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-primary">Olá, {user?.nickname || user?.name}! 👋</h1>
+          <p className="text-gray-500">Bem-vindo de volta ao Bolão10.</p>
+        </div>
+        <a 
+          href="https://chat.whatsapp.com/LWJCq74sKbvGav8mYX6Kx7?mode=gi_t" 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 bg-[#25D366] text-white px-6 py-3 rounded-2xl font-bold hover:bg-[#128C7E] transition-all shadow-md hover:shadow-lg w-fit"
+        >
+          <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+          Entrar no Grupo do WhatsApp
+        </a>
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Main Content */}
