@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Gamepad2, Trophy } from 'lucide-react';
+import { X, Globe, Trophy } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface PromoPopupProps {
@@ -51,24 +51,24 @@ export const PromoPopup: React.FC<PromoPopupProps> = ({ onNavigate }) => {
           {/* Content Area */}
           <div className="p-8 text-center mt-4">
             <div className="flex justify-center items-center gap-4 mb-6">
-              <div className="p-4 bg-amber-500/20 rounded-full border border-amber-500/30 shadow-[0_0_15px_rgba(245,158,11,0.2)]">
-                <Gamepad2 className="w-10 h-10 text-amber-400" />
+              <div className="p-4 bg-blue-500/20 rounded-full border border-blue-500/30 shadow-[0_0_15px_rgba(59,130,246,0.2)]">
+                <Globe className="w-10 h-10 text-blue-400" />
               </div>
-              <div className="p-4 bg-emerald-500/20 rounded-full border border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.2)]">
-                <Trophy className="w-10 h-10 text-emerald-400" />
+              <div className="p-4 bg-amber-500/20 rounded-full border border-amber-500/30 shadow-[0_0_15px_rgba(245,158,11,0.2)]">
+                <Trophy className="w-10 h-10 text-amber-400" />
               </div>
             </div>
 
-            <h2 className="text-2xl sm:text-3xl font-black text-white mb-6 drop-shadow-lg leading-tight">
-              🎮 PRÊMIO DUPLO NA ÁREA! 💰
+            <h2 className="text-xl sm:text-2xl font-black text-white mb-6 drop-shadow-lg leading-tight">
+              ✨ BOLÃO 10 - EDIÇÃO ESPECIAL: O DESAFIO MUNDIAL ✨
             </h2>
             
             <div className="space-y-4 text-gray-300 font-medium text-base sm:text-lg leading-relaxed">
               <p>
-                Já pensou em levar o <strong className="text-emerald-400">Bônus Acumulado</strong> e ainda ganhar um <strong className="text-amber-400">Game Stick M15</strong> com +20.000 jogos clássicos?
+                Este fim de semana é gigante! Preparamos uma <strong className="text-amber-400">4ª Rodada única</strong> com 10 Amistosos Internacionais de prestígio.
               </p>
               <p className="p-4 bg-white/5 rounded-2xl border border-white/10 shadow-inner">
-                Basta acertar os <strong className="text-white">10 palpites</strong> desta rodada para faturar o kit completo (Console + 2 Controles).
+                É sua chance de provar que conhece tudo de futebol mundial! É fácil de jogar e os prêmios são incríveis. Quantas chances de ganhar você vai garantir hoje? 🎟️
               </p>
             </div>
           </div>
@@ -82,7 +82,7 @@ export const PromoPopup: React.FC<PromoPopupProps> = ({ onNavigate }) => {
               }}
               className="w-full py-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-2xl font-bold text-lg shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:shadow-[0_0_25px_rgba(245,158,11,0.5)] transition-all transform hover:-translate-y-1"
             >
-              QUERO GANHAR AGORA!
+              👉 JOGUE AGORA E CONCORRA!
             </button>
           </div>
         </motion.div>
