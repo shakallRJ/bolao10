@@ -664,20 +664,34 @@ const LoginPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
 const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
   const { token, user } = useAuth();
   const [walletData, setWalletData] = useState<any>(null);
+  const [myPredictions, setMyPredictions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [uploadingId, setUploadingId] = useState<number | null>(null);
   const [proofFile, setProofFile] = useState<File | null>(null);
+  const [expandedPrediction, setExpandedPrediction] = useState<number | null>(null);
+  const [filterRound, setFilterRound] = useState<string>('all');
+  const [filterStatus, setFilterStatus] = useState<string>('all');
 
   const fetchWallet = async () => {
     if (!token) return;
     try {
-      const res = await fetch('/api/my-wallet', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (!res.ok) throw new Error('Falha ao carregar resumo financeiro');
-      const data = await res.json();
-      setWalletData(data);
+      const [walletRes, predRes] = await Promise.all([
+        fetch('/api/my-wallet', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }),
+        fetch('/api/my-predictions', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+      ]);
+      
+      if (!walletRes.ok || !predRes.ok) throw new Error('Falha ao carregar resumo financeiro');
+      
+      const wData = await walletRes.json();
+      const pData = await predRes.json();
+      
+      setWalletData(wData);
+      setMyPredictions(pData);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -713,6 +727,14 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
       setUploadingId(null);
     }
   };
+
+  const filteredPredictions = myPredictions.filter(p => {
+    const matchRound = filterRound === 'all' || p.round_number.toString() === filterRound;
+    const matchStatus = filterStatus === 'all' || p.status === filterStatus;
+    return matchRound && matchStatus;
+  });
+
+  const availableRounds = [...new Set(myPredictions.map(p => Number(p.round_number)))].sort((a: number, b: number) => b - a);
 
   if (loading) return <div className="flex justify-center items-center h-screen"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div></div>;
 
@@ -788,7 +810,7 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
         </div>
 
         {walletData?.pendingPredictions?.length > 0 && (
-          <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 md:p-8">
+          <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 md:p-8 mb-8">
             <h3 className="text-xl font-bold text-primary mb-6 flex items-center">
               <Clock className="w-5 h-5 mr-2" /> Palpites Pendentes de Pagamento
             </h3>
@@ -827,6 +849,138 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
             </div>
           </div>
         )}
+
+        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 md:p-8">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+            <h3 className="text-xl font-bold text-primary flex items-center">
+              <History className="w-5 h-5 mr-2" /> Histórico de Palpites
+            </h3>
+            
+            <div className="flex flex-wrap gap-3">
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-bold text-gray-500 uppercase">Rodada:</label>
+                <select 
+                  value={filterRound}
+                  onChange={(e) => setFilterRound(e.target.value)}
+                  className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="all">Todas</option>
+                  {availableRounds.map(r => (
+                    <option key={r} value={r.toString()}>#{r}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-bold text-gray-500 uppercase">Status:</label>
+                <select 
+                  value={filterStatus}
+                  onChange={(e) => setFilterStatus(e.target.value)}
+                  className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="all">Todos</option>
+                  <option value="pending">Pendente</option>
+                  <option value="approved">Aprovado</option>
+                  <option value="rejected">Rejeitado</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {filteredPredictions.length > 0 ? filteredPredictions.map((pred) => (
+              <div key={pred.id} className="border border-gray-100 rounded-2xl overflow-hidden hover:shadow-sm transition-shadow">
+                <div 
+                  onClick={() => setExpandedPrediction(expandedPrediction === pred.id ? null : pred.id)}
+                  className="flex items-center justify-between p-4 bg-white hover:bg-gray-50 transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center space-x-4">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                      pred.status === 'approved' ? 'bg-green-100 text-green-600' : 
+                      pred.status === 'rejected' ? 'bg-red-100 text-red-600' : 'bg-yellow-100 text-yellow-600'
+                    }`}>
+                      {pred.status === 'approved' ? <CheckCircle2 className="w-5 h-5" /> : 
+                       pred.status === 'rejected' ? <X className="w-5 h-5" /> : <Clock className="w-5 h-5" />}
+                    </div>
+                    <div>
+                      <p className="font-bold text-primary">Rodada #{pred.round_number}</p>
+                      <p className="text-xs text-gray-500">{formatDate(pred.created_at, 'dd/MM/yyyy HH:mm')}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-4">
+                    <div className="text-right">
+                      <p className="text-sm font-medium text-gray-700">
+                        {pred.status === 'approved' 
+                          ? (pred.round_status === 'finished' ? `${pred.score} pontos` : 'Em andamento') 
+                          : 'Aguardando'}
+                      </p>
+                      <p className={`text-xs ${
+                        pred.status === 'approved' ? 'text-green-600' : 
+                        pred.status === 'rejected' ? 'text-red-600' : 'text-yellow-600'
+                      }`}>
+                        {pred.status === 'approved' ? 'Validado' : 
+                         pred.status === 'rejected' ? 'Rejeitado' : 'Pendente'}
+                      </p>
+                    </div>
+                    <ChevronRight className={`w-5 h-5 text-gray-400 transition-transform ${expandedPrediction === pred.id ? 'rotate-90' : ''}`} />
+                  </div>
+                </div>
+                
+                <AnimatePresence>
+                  {expandedPrediction === pred.id && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="bg-gray-50 border-t border-gray-100"
+                    >
+                      <div className="p-4">
+                        <h4 className="text-sm font-bold text-gray-700 mb-3">Seus Palpites</h4>
+                        {pred.items && pred.games ? (
+                          <div className="space-y-2">
+                            {pred.games.map((game: any) => {
+                              const item = pred.items.find((i: any) => i.game_id === game.id);
+                              const guess = item?.guess;
+                              const isCorrect = game.result && guess === game.result;
+                              const isFinished = !!game.result;
+                              
+                              return (
+                                <div key={game.id} className="flex items-center justify-between bg-white p-3 rounded-xl border border-gray-100">
+                                  <div className="flex items-center space-x-3 flex-1">
+                                    <span className="text-xs font-bold text-gray-400 w-4">{game.game_order + 1}</span>
+                                    <div className="flex-1 flex justify-between items-center text-sm">
+                                      <span className={`font-medium ${guess === '1' ? 'text-primary' : 'text-gray-600'}`}>{game.home_team}</span>
+                                      <span className="text-gray-300 mx-2">x</span>
+                                      <span className={`font-medium ${guess === '2' ? 'text-primary' : 'text-gray-600'}`}>{game.away_team}</span>
+                                    </div>
+                                  </div>
+                                  <div className="ml-4 flex items-center space-x-2">
+                                    <span className="text-xs font-bold bg-gray-100 px-2 py-1 rounded text-gray-600">
+                                      {guess === '1' ? 'Casa' : guess === '2' ? 'Fora' : 'Empate'}
+                                    </span>
+                                    {isFinished && (
+                                      isCorrect 
+                                        ? <CheckCircle2 className="w-4 h-4 text-green-500" />
+                                        : <X className="w-4 h-4 text-red-500" />
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-500 italic">Detalhes não disponíveis.</p>
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )) : (
+              <p className="text-gray-500 text-center py-8">Nenhum palpite encontrado para os filtros selecionados.</p>
+            )}
+          </div>
+        </div>
       </main>
     </div>
   );
@@ -1261,14 +1415,14 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
                                     <div className="flex items-center space-x-3 flex-1">
                                       <span className="text-xs font-bold text-gray-400 w-4">{game.game_order + 1}</span>
                                       <div className="flex-1 flex justify-between items-center text-sm">
-                                        <span className={`font-medium ${guess === 'home' ? 'text-primary' : 'text-gray-600'}`}>{game.home_team}</span>
+                                        <span className={`font-medium ${guess === '1' ? 'text-primary' : 'text-gray-600'}`}>{game.home_team}</span>
                                         <span className="text-gray-300 mx-2">x</span>
-                                        <span className={`font-medium ${guess === 'away' ? 'text-primary' : 'text-gray-600'}`}>{game.away_team}</span>
+                                        <span className={`font-medium ${guess === '2' ? 'text-primary' : 'text-gray-600'}`}>{game.away_team}</span>
                                       </div>
                                     </div>
                                     <div className="ml-4 flex items-center space-x-2">
                                       <span className="text-xs font-bold bg-gray-100 px-2 py-1 rounded text-gray-600">
-                                        {guess === 'home' ? 'Casa' : guess === 'away' ? 'Fora' : 'Empate'}
+                                        {guess === '1' ? 'Casa' : guess === '2' ? 'Fora' : 'Empate'}
                                       </span>
                                       {isFinished && (
                                         isCorrect 
