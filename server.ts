@@ -434,6 +434,16 @@ app.get('/api/my-wallet', authenticate, async (req: any, res) => {
       throw error;
     }
 
+    const { data: depositsData, error: depositsError } = await supabase
+      .from('deposits')
+      .select('*')
+      .eq('user_id', req.user.id)
+      .eq('status', 'pending');
+
+    if (depositsError) {
+      console.error('Supabase error fetching deposits:', depositsError);
+    }
+
     const { data: historySetting } = await supabase.from('settings').select('value').eq('key', 'jackpot_history').maybeSingle();
     let jackpotHistory: any[] = [];
     try {
@@ -444,6 +454,7 @@ app.get('/api/my-wallet', authenticate, async (req: any, res) => {
     let totalWinnings = 0;
     const approvedPredictions = predictions?.filter(p => p.status === 'approved') || [];
     const pendingPredictions = predictions?.filter(p => p.status === 'pending') || [];
+    const pendingDeposits = depositsData || [];
     const predictionsMade = approvedPredictions.length;
 
     approvedPredictions.forEach((p: any) => {
@@ -468,7 +479,7 @@ app.get('/api/my-wallet', authenticate, async (req: any, res) => {
       }
     });
 
-    res.json({ totalSpent, predictionsMade, totalWinnings, pendingPredictions });
+    res.json({ totalSpent, predictionsMade, totalWinnings, pendingPredictions, pendingDeposits });
   } catch (err) {
     console.error('Wallet error:', err);
     res.status(500).json({ error: 'Falha ao buscar resumo financeiro' });
@@ -588,7 +599,6 @@ app.post('/api/predictions', authenticate, upload.single('proof'), async (req: a
     }
 
     const parsedGuesses = JSON.parse(guesses);
-    const proofPath = req.file ? `/uploads/${req.file.filename}` : '';
     const rId = parseInt(roundId);
 
     if (isNaN(rId)) {
@@ -598,7 +608,7 @@ app.post('/api/predictions', authenticate, upload.single('proof'), async (req: a
     // Check if round is open and deadline hasn't passed
     const { data: round, error: roundErr } = await supabase
       .from('rounds')
-      .select('status, start_time')
+      .select('status, start_time, entry_value, number')
       .eq('id', rId)
       .single();
 
@@ -615,42 +625,74 @@ app.post('/api/predictions', authenticate, upload.single('proof'), async (req: a
     }
 
     const guessesArray = Array.isArray(parsedGuesses) ? parsedGuesses : [parsedGuesses];
-    const createdIds = [];
+    const totalCost = guessesArray.length * (round.entry_value || 10);
 
+    // Fetch user wallet
+    const { data: wallet, error: walletErr } = await supabase
+      .from('wallets')
+      .select('id, balance')
+      .eq('user_id', req.user.id)
+      .single();
+
+    if (walletErr || !wallet) {
+      return res.status(400).json({ error: 'Carteira não encontrada.' });
+    }
+
+    if (wallet.balance < totalCost) {
+      return res.status(400).json({ error: 'Saldo insuficiente na carteira.' });
+    }
+
+    // Deduct balance
+    const newBalance = wallet.balance - totalCost;
+    const { error: updateWalletErr } = await supabase
+      .from('wallets')
+      .update({ balance: newBalance })
+      .eq('id', wallet.id);
+
+    if (updateWalletErr) {
+      return res.status(500).json({ error: 'Erro ao atualizar saldo da carteira.' });
+    }
+
+    // Record transaction
+    await supabase.from('wallet_transactions').insert({
+      wallet_id: wallet.id,
+      amount: -totalCost,
+      type: 'prediction_fee',
+      description: `Pagamento de palpites para rodada #${round.number || rId}`
+    });
+
+    // Insert predictions
+    const predictionIds = [];
     for (const singleGuess of guessesArray) {
-      // 1. Create prediction
-      const { data: prediction, error: predErr } = await supabase
+      const { data: predData, error: predErr } = await supabase
         .from('predictions')
-        .insert([{ 
-          user_id: req.user.id, 
-          round_id: rId, 
-          proof_path: proofPath,
-          status: 'pending'
-        }])
-        .select()
+        .insert({
+          user_id: req.user.id,
+          round_id: rId,
+          status: 'approved',
+          proof_path: 'wallet_payment'
+        })
+        .select('id')
         .single();
 
-      if (predErr) {
-        console.error('Supabase Prediction Insert Error:', predErr);
-        throw new Error(`Erro ao criar palpite: ${predErr.message}`);
+      if (predErr || !predData) {
+        console.error('Error creating prediction:', predErr);
+        continue;
       }
-      createdIds.push(prediction.id);
 
-      // 2. Create items
-      const items = Object.entries(singleGuess).map(([gameId, guess]) => ({
-        prediction_id: prediction.id,
+      predictionIds.push(predData.id);
+
+      // Insert items
+      const itemsToInsert = Object.entries(singleGuess).map(([gameId, guess]) => ({
+        prediction_id: predData.id,
         game_id: parseInt(gameId),
         guess
       }));
 
-      const { error: itemsErr } = await supabase.from('prediction_items').insert(items);
-      if (itemsErr) {
-        console.error('Supabase Items Insert Error:', itemsErr);
-        throw new Error(`Erro ao criar itens do palpite: ${itemsErr.message}`);
-      }
+      await supabase.from('prediction_items').insert(itemsToInsert);
     }
 
-    res.json({ success: true, ids: createdIds });
+    res.json({ success: true, ids: predictionIds, newBalance });
 
     // Broadcast real-time notification
     sendRealtimeNotification('all', {
@@ -667,6 +709,341 @@ app.post('/api/predictions', authenticate, upload.single('proof'), async (req: a
   } catch (err: any) {
     console.error('Prediction submission error:', err);
     res.status(500).json({ error: err.message || 'Falha ao enviar palpite' });
+  }
+});
+
+// --- NEW WALLET ENDPOINTS ---
+
+app.get('/api/wallet/balance', authenticate, async (req: any, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('wallets')
+      .select('balance')
+      .eq('user_id', req.user.id)
+      .single();
+
+    if (error && error.code !== 'PGRST116') throw error; // PGRST116 is "no rows returned"
+    
+    res.json({ balance: data?.balance || 0 });
+  } catch (err) {
+    console.error('Wallet balance error:', err);
+    res.status(500).json({ error: 'Erro ao buscar saldo' });
+  }
+});
+
+app.get('/api/wallet/transactions', authenticate, async (req: any, res) => {
+  try {
+    const { data: wallet } = await supabase.from('wallets').select('id').eq('user_id', req.user.id).single();
+    if (!wallet) return res.json([]);
+
+    const { data, error } = await supabase
+      .from('wallet_transactions')
+      .select('*')
+      .eq('wallet_id', wallet.id)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    console.error('Wallet transactions error:', err);
+    res.status(500).json({ error: 'Erro ao buscar extrato' });
+  }
+});
+
+app.post('/api/wallet/withdraw', authenticate, async (req: any, res) => {
+  const { amount, pixKey } = req.body;
+  const withdrawAmount = parseFloat(amount);
+
+  if (isNaN(withdrawAmount) || withdrawAmount <= 0) {
+    return res.status(400).json({ error: 'Valor inválido para saque' });
+  }
+
+  if (!pixKey || pixKey.trim() === '') {
+    return res.status(400).json({ error: 'Chave PIX é obrigatória' });
+  }
+
+  try {
+    // 1. Get user's wallet
+    const { data: wallet, error: walletErr } = await supabase
+      .from('wallets')
+      .select('*')
+      .eq('user_id', req.user.id)
+      .single();
+
+    if (walletErr || !wallet) {
+      return res.status(400).json({ error: 'Carteira não encontrada' });
+    }
+
+    // 2. Check balance
+    if (wallet.balance < withdrawAmount) {
+      return res.status(400).json({ error: 'Saldo insuficiente' });
+    }
+
+    // 3. Deduct from wallet
+    const newBalance = wallet.balance - withdrawAmount;
+    const { error: updateErr } = await supabase
+      .from('wallets')
+      .update({ balance: newBalance, updated_at: new Date().toISOString() })
+      .eq('id', wallet.id);
+
+    if (updateErr) throw updateErr;
+
+    // 4. Record transaction as pending withdrawal
+    const { error: transErr } = await supabase
+      .from('wallet_transactions')
+      .insert([{
+        wallet_id: wallet.id,
+        amount: -withdrawAmount,
+        type: 'withdrawal_request',
+        description: `Pedido de Saque (PIX: ${pixKey})`,
+        status: 'pending'
+      }]);
+
+    if (transErr) throw transErr;
+
+    // 5. Notify Admins
+    const { data: adminUsers } = await supabase.from('users').select('id').eq('role', 'admin');
+    if (adminUsers) {
+      adminUsers.forEach(admin => {
+        sendRealtimeNotification(admin.id, {
+          type: 'notification',
+          data: {
+            id: `withdraw-req-${Date.now()}`,
+            type: 'admin_msg',
+            msgType: 'warning',
+            title: '💸 Novo Pedido de Saque',
+            message: `${req.user.name} solicitou um saque de R$ ${withdrawAmount.toFixed(2)}.`,
+            created_at: new Date().toISOString()
+          }
+        });
+      });
+    }
+
+    res.json({ success: true, newBalance });
+  } catch (err: any) {
+    console.error('Withdrawal error:', err);
+    res.status(500).json({ error: 'Erro ao solicitar saque' });
+  }
+});
+
+app.post('/api/wallet/deposit', authenticate, upload.single('proof'), async (req: any, res) => {
+  try {
+    const { amount } = req.body;
+    const depositAmount = parseFloat(amount);
+
+    if (isNaN(depositAmount) || depositAmount <= 0) {
+      return res.status(400).json({ error: 'Valor de depósito inválido' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'Comprovante é obrigatório' });
+    }
+
+    const proofPath = `/uploads/${req.file.filename}`;
+
+    const { data, error } = await supabase
+      .from('deposits')
+      .insert([{
+        user_id: req.user.id,
+        amount: depositAmount,
+        proof_url: proofPath,
+        status: 'pending'
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.json({ success: true, deposit: data });
+  } catch (err: any) {
+    console.error('Deposit error:', err);
+    res.status(500).json({ error: err.message || 'Erro ao registrar depósito' });
+  }
+});
+
+// Admin endpoint to get pending deposits
+app.get('/api/admin/deposits', authenticate, isAdmin, async (req: any, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('deposits')
+      .select(`
+        id,
+        amount,
+        proof_url,
+        status,
+        created_at,
+        users:user_id (
+          name,
+          nickname,
+          email,
+          phone
+        )
+      `)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    const formattedData = data.map(d => {
+      const user = Array.isArray(d.users) ? d.users[0] : d.users;
+      return {
+        id: d.id,
+        amount: d.amount,
+        proof_url: d.proof_url,
+        status: d.status,
+        created_at: d.created_at,
+        user_name: user?.name,
+        user_nickname: user?.nickname,
+        user_email: user?.email,
+        user_phone: user?.phone
+      };
+    });
+
+    res.json(formattedData);
+  } catch (err: any) {
+    console.error('Fetch deposits error:', err);
+    res.status(500).json({ error: err.message || 'Erro ao buscar depósitos' });
+  }
+});
+
+// Admin endpoint to approve or reject deposit
+app.post('/api/admin/deposits/:id/approve', authenticate, isAdmin, async (req: any, res) => {
+  try {
+    const depositId = req.params.id;
+    const { status } = req.body; // 'approved' or 'rejected'
+
+    if (status !== 'approved' && status !== 'rejected') {
+      return res.status(400).json({ error: 'Status inválido' });
+    }
+
+    const { data: deposit, error: depErr } = await supabase
+      .from('deposits')
+      .select('*')
+      .eq('id', depositId)
+      .single();
+
+    if (depErr || !deposit) return res.status(404).json({ error: 'Depósito não encontrado' });
+    if (deposit.status !== 'pending') return res.status(400).json({ error: 'Depósito já processado' });
+
+    if (status === 'approved') {
+      // Get wallet
+      const { data: wallet, error: walErr } = await supabase
+        .from('wallets')
+        .select('*')
+        .eq('user_id', deposit.user_id)
+        .single();
+
+      if (walErr || !wallet) return res.status(404).json({ error: 'Carteira não encontrada' });
+
+      const newBalance = parseFloat(wallet.balance) + parseFloat(deposit.amount);
+
+      // 1. Update Wallet
+      const { error: updateWalErr } = await supabase
+        .from('wallets')
+        .update({ balance: newBalance, updated_at: new Date().toISOString() })
+        .eq('id', wallet.id);
+
+      if (updateWalErr) throw updateWalErr;
+
+      // 2. Insert Transaction
+      await supabase.from('wallet_transactions').insert([{
+        wallet_id: wallet.id,
+        amount: deposit.amount,
+        type: 'deposit',
+        balance_after: newBalance,
+        reference_id: deposit.id,
+        description: 'Depósito via PIX aprovado'
+      }]);
+
+      // 3. Send Notification
+      const { data: setting } = await supabase.from('settings').select('value').eq('key', 'admin_notifications').maybeSingle();
+      let notifications = [];
+      if (setting?.value) {
+        try {
+          notifications = JSON.parse(setting.value);
+        } catch (e) {
+          notifications = [];
+        }
+      }
+
+      const newNotification = {
+        id: `dep-app-${Date.now()}`,
+        title: '💰 Depósito Aprovado!',
+        message: `Seu depósito de R$ ${parseFloat(deposit.amount).toFixed(2)} foi aprovado e creditado na sua carteira.`,
+        type: 'success',
+        target_type: 'individual',
+        user_id: deposit.user_id,
+        created_at: new Date().toISOString(),
+        sender_id: req.user.id
+      };
+
+      notifications.unshift(newNotification);
+      if (notifications.length > 100) notifications = notifications.slice(0, 100);
+
+      await supabase
+        .from('settings')
+        .upsert({ key: 'admin_notifications', value: JSON.stringify(notifications) }, { onConflict: 'key' });
+
+      sendRealtimeNotification(deposit.user_id, {
+        type: 'notification',
+        data: {
+          ...newNotification,
+          type: 'admin_msg',
+          msgType: 'success',
+          createdAt: newNotification.created_at
+        }
+      });
+    } else if (status === 'rejected') {
+      // Send Notification for rejection
+      const { data: setting } = await supabase.from('settings').select('value').eq('key', 'admin_notifications').maybeSingle();
+      let notifications = [];
+      if (setting?.value) {
+        try {
+          notifications = JSON.parse(setting.value);
+        } catch (e) {
+          notifications = [];
+        }
+      }
+
+      const newNotification = {
+        id: `dep-rej-${Date.now()}`,
+        title: '❌ Depósito Rejeitado',
+        message: `Seu depósito de R$ ${parseFloat(deposit.amount).toFixed(2)} foi rejeitado. Verifique o comprovante e tente novamente.`,
+        type: 'error',
+        target_type: 'individual',
+        user_id: deposit.user_id,
+        created_at: new Date().toISOString(),
+        sender_id: req.user.id
+      };
+
+      notifications.unshift(newNotification);
+      if (notifications.length > 100) notifications = notifications.slice(0, 100);
+
+      await supabase
+        .from('settings')
+        .upsert({ key: 'admin_notifications', value: JSON.stringify(notifications) }, { onConflict: 'key' });
+
+      sendRealtimeNotification(deposit.user_id, {
+        type: 'notification',
+        data: {
+          ...newNotification,
+          type: 'admin_msg',
+          msgType: 'error',
+          createdAt: newNotification.created_at
+        }
+      });
+    }
+
+    // 4. Update Deposit Status
+    await supabase
+      .from('deposits')
+      .update({ status: status, approved_by: req.user.id, updated_at: new Date().toISOString() })
+      .eq('id', deposit.id);
+
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Approve deposit error:', err);
+    res.status(500).json({ error: err.message || 'Erro ao processar depósito' });
   }
 });
 
@@ -839,6 +1216,47 @@ app.get('/api/rounds/:id/check-prediction', authenticate, async (req: any, res) 
   }
 });
 
+// Admin: User Wallets Detailed
+app.get('/api/admin/user-wallets', authenticate, isAdmin, async (req, res) => {
+  try {
+    const { data: users, error: usersErr } = await supabase.from('users').select('id, name, email, nickname');
+    if (usersErr) throw usersErr;
+
+    const { data: wallets, error: walletsErr } = await supabase.from('wallets').select('id, user_id, balance');
+    if (walletsErr) throw walletsErr;
+
+    const { data: transactions, error: transErr } = await supabase.from('wallet_transactions').select('*');
+    if (transErr) throw transErr;
+
+    const { data: deposits, error: depErr } = await supabase.from('deposits').select('*').order('created_at', { ascending: false });
+    if (depErr) throw depErr;
+
+    const userWallets = users.map(user => {
+      const wallet = wallets?.find(w => w.user_id === user.id);
+      const userTransactions = wallet ? (transactions || []).filter(t => t.wallet_id === wallet.id) : [];
+      const userDeposits = (deposits || []).filter(d => d.user_id === user.id);
+
+      const totalDeposited = userTransactions.filter(t => t.type === 'deposit').reduce((sum, t) => sum + t.amount, 0);
+      const totalWinnings = userTransactions.filter(t => t.type === 'prize').reduce((sum, t) => sum + t.amount, 0);
+      const totalWithdrawn = userTransactions.filter(t => t.type === 'withdrawal').reduce((sum, t) => sum + Math.abs(t.amount), 0);
+
+      return {
+        user: { id: user.id, name: user.name, email: user.email, nickname: user.nickname },
+        balance: wallet ? wallet.balance : 0,
+        totalDeposited,
+        totalWinnings,
+        totalWithdrawn,
+        deposits: userDeposits
+      };
+    });
+
+    res.json(userWallets);
+  } catch (err) {
+    console.error('Error fetching user wallets:', err);
+    res.status(500).json({ error: 'Erro ao buscar carteiras dos usuários' });
+  }
+});
+
 // Admin: User Management
 app.get('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   try {
@@ -1003,9 +1421,137 @@ app.post('/api/admin/rounds', authenticate, isAdmin, async (req, res) => {
     const { error: gamesErr } = await supabase.from('games').insert(gameItems);
     if (gamesErr) throw gamesErr;
 
+    // Send real-time notification for new round
+    sendRealtimeNotification('all', {
+      type: 'notification',
+      data: {
+        id: `round-${round.id}-${Date.now()}`,
+        type: 'admin_msg',
+        msgType: 'info',
+        title: '⚽ Nova Rodada Aberta!',
+        message: `A Rodada #${number} já está aberta para palpites. Garanta sua participação!`,
+        created_at: new Date().toISOString()
+      }
+    });
+
     res.json({ success: true, roundId: round.id });
   } catch (err) {
     res.status(500).json({ error: 'Failed to create round' });
+  }
+});
+
+app.get('/api/admin/pending-withdrawals', authenticate, isAdmin, async (req, res) => {
+  try {
+    const { data: withdrawals } = await supabase
+      .from('wallet_transactions')
+      .select(`
+        *,
+        wallets (
+          user_id,
+          users (name, email, nickname, phone)
+        )
+      `)
+      .eq('type', 'withdrawal_request')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
+
+    const formatted = withdrawals?.map((w: any) => ({
+      ...w,
+      user_name: w.wallets?.users?.name,
+      user_nickname: w.wallets?.users?.nickname,
+      user_email: w.wallets?.users?.email,
+      user_phone: w.wallets?.users?.phone,
+      user_id: w.wallets?.user_id
+    })) || [];
+
+    res.json(formatted);
+  } catch (err) {
+    console.error('Fetch pending withdrawals error:', err);
+    res.status(500).json({ error: 'Erro ao buscar saques pendentes' });
+  }
+});
+
+app.post('/api/admin/withdrawals/:id/approve', authenticate, isAdmin, async (req, res) => {
+  try {
+    // 1. Get transaction
+    const { data: transaction } = await supabase
+      .from('wallet_transactions')
+      .select('*, wallets(user_id)')
+      .eq('id', req.params.id)
+      .single();
+
+    if (!transaction) return res.status(404).json({ error: 'Saque não encontrado' });
+    if (transaction.status !== 'pending') return res.status(400).json({ error: 'Saque já processado' });
+
+    // 2. Update transaction status
+    const { error: updateErr } = await supabase
+      .from('wallet_transactions')
+      .update({ status: 'completed' })
+      .eq('id', req.params.id);
+
+    if (updateErr) throw updateErr;
+
+    // 3. Notify user
+    sendRealtimeNotification(transaction.wallets.user_id, {
+      type: 'notification',
+      data: {
+        id: `withdraw-app-${Date.now()}`,
+        type: 'admin_msg',
+        msgType: 'success',
+        title: '💸 Saque Realizado!',
+        message: `Seu pedido de saque de R$ ${Math.abs(transaction.amount).toFixed(2)} foi processado e transferido para sua conta.`,
+        created_at: new Date().toISOString()
+      }
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Approve withdrawal error:', err);
+    res.status(500).json({ error: 'Erro ao aprovar saque' });
+  }
+});
+
+app.post('/api/admin/withdrawals/:id/reject', authenticate, isAdmin, async (req, res) => {
+  try {
+    // 1. Get transaction
+    const { data: transaction } = await supabase
+      .from('wallet_transactions')
+      .select('*, wallets(id, balance, user_id)')
+      .eq('id', req.params.id)
+      .single();
+
+    if (!transaction) return res.status(404).json({ error: 'Saque não encontrado' });
+    if (transaction.status !== 'pending') return res.status(400).json({ error: 'Saque já processado' });
+
+    // 2. Refund wallet
+    const newBalance = transaction.wallets.balance + Math.abs(transaction.amount);
+    await supabase.from('wallets').update({ balance: newBalance }).eq('id', transaction.wallets.id);
+
+    // 3. Update transaction status
+    const { error: updateErr } = await supabase
+      .from('wallet_transactions')
+      .update({ status: 'rejected' })
+      .eq('id', req.params.id);
+
+    if (updateErr) throw updateErr;
+
+    // 4. Notify user
+    sendRealtimeNotification(transaction.wallets.user_id, {
+      type: 'notification',
+      data: {
+        id: `withdraw-rej-${Date.now()}`,
+        type: 'admin_msg',
+        msgType: 'error',
+        title: '❌ Saque Rejeitado',
+        message: `Seu pedido de saque de R$ ${Math.abs(transaction.amount).toFixed(2)} foi rejeitado. O valor retornou para sua carteira.`,
+        created_at: new Date().toISOString()
+      }
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Reject withdrawal error:', err);
+    res.status(500).json({ error: 'Erro ao rejeitar saque' });
   }
 });
 
@@ -1134,20 +1680,21 @@ app.post('/api/admin/rounds/:id/finish', authenticate, isAdmin, async (req, res)
     // Find winners (highest score)
     const { data: scoredPredictions } = await supabase
       .from('predictions')
-      .select('score, users(name, nickname)')
+      .select('score, user_id, users(name, nickname)')
       .eq('round_id', req.params.id)
       .eq('status', 'approved')
       .order('score', { ascending: false });
 
     const maxScore = scoredPredictions?.[0]?.score || 0;
-    const winners = scoredPredictions?.filter(p => p.score === maxScore).map(p => {
+    const winnersData = scoredPredictions?.filter(p => p.score === maxScore) || [];
+    const winners = winnersData.map(p => {
       const u = Array.isArray(p.users) ? p.users[0] : p.users;
       return u?.nickname || u?.name;
-    }) || [];
+    });
     
     // Check if anyone got 10/10 for jackpot, or if admin forced jackpot distribution
     const tenCorrect = distributeJackpot 
-      ? scoredPredictions?.filter(p => p.score === maxScore) || []
+      ? winnersData
       : scoredPredictions?.filter(p => p.score === 10) || [];
 
     let jackpotWinnerNames = null;
@@ -1181,16 +1728,20 @@ app.post('/api/admin/rounds/:id/finish', authenticate, isAdmin, async (req, res)
       throw updateErr;
     }
 
-    // Record prizes in history
-    if (winners.length > 0) {
+    // Record prizes in history and credit wallets
+    if (winnersData.length > 0) {
       const { data: prizesSetting } = await supabase.from('settings').select('value').eq('key', 'prizes_history').maybeSingle();
       let prizesHistory = [];
       try {
         if (prizesSetting?.value) prizesHistory = JSON.parse(prizesSetting.value);
       } catch (e) {}
       
-      const prizePerWinner = winnersPool / winners.length;
-      winners.forEach(name => {
+      const prizePerWinner = winnersPool / winnersData.length;
+      
+      for (const winner of winnersData) {
+        const u = Array.isArray(winner.users) ? winner.users[0] : winner.users;
+        const name = u?.nickname || u?.name;
+        
         prizesHistory.push({
           round_id: req.params.id,
           round_number: round.number,
@@ -1199,7 +1750,35 @@ app.post('/api/admin/rounds/:id/finish', authenticate, isAdmin, async (req, res)
           date: new Date().toISOString(),
           type: 'round_winner'
         });
-      });
+
+        // Credit Wallet
+        const { data: wallet } = await supabase.from('wallets').select('*').eq('user_id', winner.user_id).single();
+        if (wallet) {
+          const newBalance = wallet.balance + prizePerWinner;
+          await supabase.from('wallets').update({ balance: newBalance, updated_at: new Date().toISOString() }).eq('id', wallet.id);
+          
+          await supabase.from('wallet_transactions').insert([{
+            wallet_id: wallet.id,
+            amount: prizePerWinner,
+            type: 'prize_credit',
+            balance_after: newBalance,
+            description: `Prêmio da Rodada #${round.number}`
+          }]);
+          
+          // Notify individual winner
+          sendRealtimeNotification(winner.user_id, {
+            type: 'notification',
+            data: {
+              id: `win-personal-${req.params.id}-${Date.now()}`,
+              type: 'admin_msg',
+              msgType: 'success',
+              title: '💰 Prêmio Recebido!',
+              message: `Você ganhou R$ ${prizePerWinner.toFixed(2)} na Rodada #${round.number}. O valor já está na sua carteira!`,
+              created_at: new Date().toISOString()
+            }
+          });
+        }
+      }
       
       await supabase.from('settings').upsert({ key: 'prizes_history', value: JSON.stringify(prizesHistory) }, { onConflict: 'key' });
 

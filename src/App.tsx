@@ -38,7 +38,8 @@ import {
   Plus,
   Edit,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  PlusCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -48,7 +49,9 @@ import autoTable from 'jspdf-autotable';
 import { Download } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { generatePixPayload } from './utils/pix';
+import { DepositModal } from './components/DepositModal';
 import { PromoPopup } from './components/PromoPopup';
+import { Toaster, toast } from 'sonner';
 
 // --- HELPERS ---
 
@@ -134,9 +137,11 @@ const NotificationsDropdown = () => {
           const message = JSON.parse(event.data);
           if (message.type === 'notification') {
             const newNotif = message.data;
+            
             setNotifications(prev => {
               // Avoid duplicates
               if (prev.some(n => n.id === newNotif.id)) return prev;
+              
               const updated = [newNotif, ...prev];
               
               // Update unread count
@@ -150,12 +155,31 @@ const NotificationsDropdown = () => {
                 setUnreadCount(c => c + 1);
               }
               
+              // Show toast notification only for new notifications
+              // We do this inside a setTimeout to avoid React state update warnings
+              setTimeout(() => {
+                if (newNotif.msgType === 'success') {
+                  toast.success(newNotif.title || 'Sucesso', { description: newNotif.message });
+                } else if (newNotif.msgType === 'error') {
+                  toast.error(newNotif.title || 'Erro', { description: newNotif.message });
+                } else if (newNotif.msgType === 'warning') {
+                  toast.warning(newNotif.title || 'Aviso', { description: newNotif.message });
+                } else {
+                  toast.info(newNotif.title || 'Nova Notificação', { description: newNotif.message });
+                }
+
+                // Optional: Play a sound or show a browser notification
+                if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+                  new Notification(newNotif.title, { body: newNotif.message });
+                }
+              }, 0);
+
               return updated;
             });
 
-            // Optional: Play a sound or show a browser notification
-            if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-              new Notification(newNotif.title, { body: newNotif.message });
+            // Dispatch custom event for other components to react
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('new_notification', { detail: newNotif }));
             }
           }
         } catch (err) {
@@ -412,7 +436,7 @@ const LandingPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => 
             transition={{ delay: 0.1 }}
             className="mt-6 text-xl text-gray-600 max-w-2xl mx-auto"
           >
-            A plataforma de palpites de futebol focada em conhecimento e transparência. Sem algoritmos, sem truques. Apenas você e seus amigos.
+            A plataforma de palpites de futebol focada em conhecimento e transparência. Sem algoritmos, sem truques.
           </motion.p>
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
@@ -436,7 +460,7 @@ const LandingPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => 
           {[
             { title: 'Transparência Total', desc: 'Todos os palpites ficam visíveis para todos os participantes assim que a rodada começa.', icon: ShieldCheck },
             { title: 'Prêmios Reais', desc: '75% da arrecadação vai para os vencedores da rodada. Simples e direto.', icon: Trophy },
-            { title: 'Bônus Acumulado', desc: 'Acerte os 10 resultados e leve o pote acumulado do Bônus 10.', icon: CheckCircle2 },
+            { title: 'Bônus Acumulado', desc: 'Acerte os 10 resultados e leve o pote acumulado do Bônus 10 + 01 Game Stick M15.', icon: CheckCircle2 },
           ].map((feature, i) => (
             <motion.div 
               key={i}
@@ -665,6 +689,9 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
   const { token, user } = useAuth();
   const [walletData, setWalletData] = useState<any>(null);
   const [myPredictions, setMyPredictions] = useState<any[]>([]);
+  const [balance, setBalance] = useState<number>(0);
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [uploadingId, setUploadingId] = useState<number | null>(null);
@@ -672,15 +699,25 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
   const [expandedPrediction, setExpandedPrediction] = useState<number | null>(null);
   const [filterRound, setFilterRound] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
+  const [withdrawAmount, setWithdrawAmount] = useState('');
+  const [pixKey, setPixKey] = useState('');
+  const [withdrawing, setWithdrawing] = useState(false);
 
   const fetchWallet = async () => {
     if (!token) return;
     try {
-      const [walletRes, predRes] = await Promise.all([
+      const [walletRes, predRes, balanceRes, transRes] = await Promise.all([
         fetch('/api/my-wallet', {
           headers: { 'Authorization': `Bearer ${token}` }
         }),
         fetch('/api/my-predictions', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }),
+        fetch('/api/wallet/balance', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }),
+        fetch('/api/wallet/transactions', {
           headers: { 'Authorization': `Bearer ${token}` }
         })
       ]);
@@ -689,9 +726,13 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
       
       const wData = await walletRes.json();
       const pData = await predRes.json();
+      const bData = await balanceRes.json();
+      const tData = await transRes.json();
       
       setWalletData(wData);
       setMyPredictions(pData);
+      setBalance(bData.balance || 0);
+      setTransactions(tData || []);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -701,6 +742,18 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
 
   useEffect(() => {
     fetchWallet();
+
+    const handleNewNotification = (e: any) => {
+      const notif = e.detail;
+      if (notif && notif.id && (notif.id.startsWith('dep-app-') || notif.id.startsWith('dep-rej-'))) {
+        fetchWallet();
+      }
+    };
+
+    window.addEventListener('new_notification', handleNewNotification);
+    return () => {
+      window.removeEventListener('new_notification', handleNewNotification);
+    };
   }, [token]);
 
   const handleUpdateProof = async (id: number) => {
@@ -725,6 +778,40 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
     } catch (err: any) {
       alert(err.message);
       setUploadingId(null);
+    }
+  };
+
+  const handleWithdraw = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amount = parseFloat(withdrawAmount);
+    if (isNaN(amount) || amount <= 0) return toast.error('Valor inválido');
+    if (amount > balance) return toast.error('Saldo insuficiente');
+    if (!pixKey.trim()) return toast.error('Chave PIX é obrigatória');
+
+    setWithdrawing(true);
+    try {
+      const res = await fetch('/api/wallet/withdraw', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ amount, pixKey })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success('Pedido de saque enviado com sucesso!');
+        setIsWithdrawModalOpen(false);
+        setWithdrawAmount('');
+        setPixKey('');
+        fetchWallet();
+      } else {
+        toast.error(data.error || 'Erro ao solicitar saque');
+      }
+    } catch (err) {
+      toast.error('Erro na conexão');
+    } finally {
+      setWithdrawing(false);
     }
   };
 
@@ -768,35 +855,67 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-gray-50 rounded-2xl p-6 border border-gray-100">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-gray-500 font-medium">Total Gasto</h3>
-                <TrendingDown className="w-5 h-5 text-red-500" />
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="bg-gradient-to-br from-primary to-primary/80 rounded-2xl p-6 border border-gray-100 text-white shadow-md flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-white/80 font-medium">Saldo Disponível</h3>
+                  <Wallet className="w-5 h-5 text-white" />
+                </div>
+                <p className="text-3xl font-bold mb-4">
+                  R$ {balance.toFixed(2)}
+                </p>
               </div>
-              <p className="text-3xl font-bold text-gray-900">
-                R$ {walletData?.totalSpent?.toFixed(2) || '0.00'}
-              </p>
+              <div className="flex gap-2 mt-auto">
+                <button 
+                  onClick={() => setIsDepositModalOpen(true)}
+                  className="flex-1 bg-white text-primary font-bold py-2 rounded-xl hover:bg-gray-50 transition-colors"
+                >
+                  Depositar
+                </button>
+                <button 
+                  onClick={() => setIsWithdrawModalOpen(true)}
+                  className="flex-1 bg-primary-dark border border-white/20 text-white font-bold py-2 rounded-xl hover:bg-white/10 transition-colors"
+                >
+                  Sacar
+                </button>
+              </div>
             </div>
 
-            <div className="bg-gray-50 rounded-2xl p-6 border border-gray-100">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-gray-500 font-medium">Total Ganho</h3>
-                <TrendingUp className="w-5 h-5 text-green-500" />
+            <div className="bg-gray-50 rounded-2xl p-6 border border-gray-100 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-gray-500 font-medium">Total Ganho</h3>
+                  <TrendingUp className="w-5 h-5 text-green-500" />
+                </div>
+                <p className="text-3xl font-bold text-green-600">
+                  R$ {walletData?.totalWinnings?.toFixed(2) || '0.00'}
+                </p>
               </div>
-              <p className="text-3xl font-bold text-green-600">
-                R$ {walletData?.totalWinnings?.toFixed(2) || '0.00'}
-              </p>
             </div>
 
-            <div className="bg-gray-50 rounded-2xl p-6 border border-gray-100">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-gray-500 font-medium">Palpites Feitos</h3>
-                <Trophy className="w-5 h-5 text-primary" />
+            <div className="bg-gray-50 rounded-2xl p-6 border border-gray-100 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-gray-500 font-medium">Palpites Feitos</h3>
+                  <Trophy className="w-5 h-5 text-primary" />
+                </div>
+                <p className="text-3xl font-bold text-gray-900">
+                  {walletData?.predictionsMade || 0}
+                </p>
               </div>
-              <p className="text-3xl font-bold text-gray-900">
-                {walletData?.predictionsMade || 0}
-              </p>
+            </div>
+
+            <div className="bg-gray-50 rounded-2xl p-6 border border-gray-100 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-gray-500 font-medium">Depósitos Pendentes</h3>
+                  <Clock className="w-5 h-5 text-orange-500" />
+                </div>
+                <p className="text-3xl font-bold text-orange-600">
+                  R$ {(walletData?.pendingDeposits?.reduce((acc: number, d: any) => acc + d.amount, 0) || 0).toFixed(2)}
+                </p>
+              </div>
             </div>
           </div>
           
@@ -849,6 +968,37 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
             </div>
           </div>
         )}
+
+        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 md:p-8 mb-8">
+          <h3 className="text-xl font-bold text-primary mb-6 flex items-center">
+            <History className="w-5 h-5 mr-2" /> Extrato da Carteira
+          </h3>
+          <div className="space-y-4">
+            {transactions.length > 0 ? transactions.map((tx: any) => (
+              <div key={tx.id} className="flex items-center justify-between p-4 border border-gray-100 rounded-2xl bg-gray-50">
+                <div className="flex items-center space-x-4">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                    tx.amount > 0 ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
+                  }`}>
+                    {tx.amount > 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
+                  </div>
+                  <div>
+                    <p className="font-bold text-gray-900">{tx.description}</p>
+                    <p className="text-xs text-gray-500">{formatDate(tx.created_at, 'dd/MM/yyyy HH:mm')}</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className={`font-bold ${tx.amount > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {tx.amount > 0 ? '+' : ''}R$ {Math.abs(tx.amount).toFixed(2)}
+                  </p>
+                  <p className="text-xs text-gray-500">Saldo: R$ {tx.balance_after.toFixed(2)}</p>
+                </div>
+              </div>
+            )) : (
+              <p className="text-gray-500 text-center py-4">Nenhuma transação encontrada.</p>
+            )}
+          </div>
+        </div>
 
         <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 md:p-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
@@ -982,6 +1132,67 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
           </div>
         </div>
       </main>
+
+      <DepositModal
+        isOpen={isDepositModalOpen}
+        onClose={() => setIsDepositModalOpen(false)}
+        token={token}
+        onDepositSuccess={() => {
+          setIsDepositModalOpen(false);
+          fetchWallet();
+        }}
+      />
+
+      {isWithdrawModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-bold text-gray-900">Solicitar Saque</h3>
+              <button onClick={() => setIsWithdrawModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            
+            <form onSubmit={handleWithdraw} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Valor do Saque (R$)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="1"
+                  max={balance}
+                  value={withdrawAmount}
+                  onChange={e => setWithdrawAmount(e.target.value)}
+                  className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary focus:border-transparent"
+                  placeholder="0.00"
+                  required
+                />
+                <p className="text-sm text-gray-500 mt-1">Saldo disponível: R$ {balance.toFixed(2)}</p>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Chave PIX</label>
+                <input
+                  type="text"
+                  value={pixKey}
+                  onChange={e => setPixKey(e.target.value)}
+                  className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary focus:border-transparent"
+                  placeholder="CPF, E-mail, Telefone ou Chave Aleatória"
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={withdrawing || !withdrawAmount || !pixKey}
+                className="w-full bg-primary text-white font-bold py-3 rounded-xl hover:bg-primary-dark transition-colors disabled:opacity-50 mt-6"
+              >
+                {withdrawing ? 'Processando...' : 'Confirmar Saque'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -1178,56 +1389,76 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
   const [currentRound, setCurrentRound] = useState<any>(null);
   const [myPredictions, setMyPredictions] = useState<any[]>([]);
   const [walletData, setWalletData] = useState<any>(null);
+  const [balance, setBalance] = useState<number>(0);
+  const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedPrediction, setExpandedPrediction] = useState<string | null>(null);
 
+  const fetchData = async () => {
+    if (!token) return;
+    try {
+      const [roundRes, predRes, walletRes, balanceRes] = await Promise.all([
+        fetch('/api/rounds/current'),
+        fetch('/api/my-predictions', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }),
+        fetch('/api/my-wallet', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }),
+        fetch('/api/wallet/balance', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+      ]);
+      
+      if (roundRes.status === 401 || predRes.status === 401 || walletRes.status === 401) {
+        logout();
+        return;
+      }
+
+      if (!roundRes.ok) {
+        const errorData = await roundRes.json().catch(() => ({}));
+        throw new Error(`Erro ao carregar rodada: ${errorData.error || roundRes.statusText}`);
+      }
+      if (!predRes.ok) {
+        const errorData = await predRes.json().catch(() => ({}));
+        throw new Error(`Erro ao carregar palpites: ${errorData.error || predRes.statusText}`);
+      }
+      if (!walletRes.ok) {
+        const errorData = await walletRes.json().catch(() => ({}));
+        throw new Error(`Erro ao carregar carteira: ${errorData.error || walletRes.statusText}`);
+      }
+
+      const roundData = await roundRes.json();
+      const predData = await predRes.json();
+      const walletData = await walletRes.json();
+      const balanceData = await balanceRes.json().catch(() => ({ balance: 0 }));
+      setCurrentRound(roundData);
+      setMyPredictions(predData);
+      setWalletData(walletData);
+      setBalance(balanceData.balance || 0);
+    } catch (err: any) {
+      console.error('Dashboard error:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchData = async () => {
-      if (!token) return;
-      try {
-        const [roundRes, predRes, walletRes] = await Promise.all([
-          fetch('/api/rounds/current'),
-          fetch('/api/my-predictions', {
-            headers: { 'Authorization': `Bearer ${token}` }
-          }),
-          fetch('/api/my-wallet', {
-            headers: { 'Authorization': `Bearer ${token}` }
-          })
-        ]);
-        
-        if (roundRes.status === 401 || predRes.status === 401 || walletRes.status === 401) {
-          logout();
-          return;
-        }
+    fetchData();
 
-        if (!roundRes.ok) {
-          const errorData = await roundRes.json().catch(() => ({}));
-          throw new Error(`Erro ao carregar rodada: ${errorData.error || roundRes.statusText}`);
-        }
-        if (!predRes.ok) {
-          const errorData = await predRes.json().catch(() => ({}));
-          throw new Error(`Erro ao carregar palpites: ${errorData.error || predRes.statusText}`);
-        }
-        if (!walletRes.ok) {
-          const errorData = await walletRes.json().catch(() => ({}));
-          throw new Error(`Erro ao carregar carteira: ${errorData.error || walletRes.statusText}`);
-        }
-
-        const roundData = await roundRes.json();
-        const predData = await predRes.json();
-        const walletData = await walletRes.json();
-        setCurrentRound(roundData);
-        setMyPredictions(predData);
-        setWalletData(walletData);
-      } catch (err: any) {
-        console.error('Dashboard error:', err);
-        setError(err.message);
-      } finally {
-        setLoading(false);
+    const handleNewNotification = (e: any) => {
+      const notif = e.detail;
+      if (notif && notif.id && (notif.id.startsWith('dep-app-') || notif.id.startsWith('dep-rej-'))) {
+        fetchData();
       }
     };
-    fetchData();
+
+    window.addEventListener('new_notification', handleNewNotification);
+    return () => {
+      window.removeEventListener('new_notification', handleNewNotification);
+    };
   }, [token]);
 
   if (loading) return <div className="flex justify-center items-center h-64">Carregando...</div>;
@@ -1258,56 +1489,91 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
           <h1 className="text-3xl font-bold text-primary">Olá, {user?.nickname || user?.name}! 👋</h1>
           <p className="text-gray-500">Bem-vindo de volta ao Bolão10.</p>
         </div>
-        <a 
-          href="https://chat.whatsapp.com/LWJCq74sKbvGav8mYX6Kx7?mode=gi_t" 
-          target="_blank" 
-          rel="noopener noreferrer"
-          className="flex items-center gap-2 bg-[#25D366] text-white px-6 py-3 rounded-2xl font-bold hover:bg-[#128C7E] transition-all shadow-md hover:shadow-lg w-fit"
-        >
-          <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
-          Entrar no Grupo do WhatsApp
-        </a>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => setIsDepositModalOpen(true)}
+            className="flex items-center gap-2 bg-primary text-white px-6 py-3 rounded-2xl font-bold hover:bg-primary-dark transition-all shadow-md hover:shadow-lg w-fit"
+          >
+            <PlusCircle className="w-5 h-5" />
+            Depositar
+          </button>
+          <a 
+            href="https://chat.whatsapp.com/LWJCq74sKbvGav8mYX6Kx7?mode=gi_t" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 bg-[#25D366] text-white px-6 py-3 rounded-2xl font-bold hover:bg-[#128C7E] transition-all shadow-md hover:shadow-lg w-fit"
+          >
+            <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+            Entrar no Grupo do WhatsApp
+          </a>
+        </div>
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Main Content */}
         <div className="lg:col-span-2 space-y-8">
           {/* Wallet Summary */}
           {walletData && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-3xl p-6 text-white shadow-md flex items-center justify-between">
-                <div>
-                  <p className="text-green-100 font-medium mb-1">Total Ganho</p>
-                  <p className="text-3xl font-bold">R$ {walletData.totalWinnings?.toFixed(2) || '0.00'}</p>
+            <div className="space-y-4">
+              {/* Prominent Wallet Card */}
+              <div className="bg-primary rounded-3xl p-6 md:p-8 text-white shadow-lg flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full -mr-20 -mt-20 pointer-events-none"></div>
+                <div className="absolute bottom-0 left-0 w-40 h-40 bg-white opacity-5 rounded-full -ml-10 -mb-10 pointer-events-none"></div>
+                
+                <div className="relative z-10 flex items-center gap-6 w-full md:w-auto">
+                  <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm flex-shrink-0">
+                    <Wallet className="w-8 h-8 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-white/80 font-medium mb-1">Saldo em Carteira</p>
+                    <h2 className="text-4xl font-bold tracking-tight">R$ {balance.toFixed(2)}</h2>
+                  </div>
                 </div>
-                <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
-                  <TrendingUp className="w-6 h-6 text-white" />
+                
+                <div className="relative z-10 flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+                  <button
+                    onClick={() => setIsDepositModalOpen(true)}
+                    className="flex items-center justify-center gap-2 bg-[#25D366] text-white px-8 py-4 rounded-2xl font-bold hover:bg-[#128C7E] transition-all shadow-md hover:shadow-lg"
+                  >
+                    <PlusCircle className="w-5 h-5" />
+                    Depositar Agora
+                  </button>
+                  <button
+                    onClick={() => onNavigate('wallet')}
+                    className="flex items-center justify-center gap-2 bg-white/10 text-white px-6 py-4 rounded-2xl font-bold hover:bg-white/20 transition-all backdrop-blur-sm"
+                  >
+                    Ver Extrato
+                  </button>
                 </div>
               </div>
-              <div className="bg-gradient-to-br from-amber-500 to-amber-600 rounded-3xl p-6 text-white shadow-md flex items-center justify-between">
-                <div>
-                  <p className="text-amber-100 font-medium mb-1">Bônus 10 Acertos</p>
-                  <p className="text-3xl font-bold">R$ {currentRound?.jackpotPool?.toFixed(2) || '0.00'}</p>
+
+              {/* Other Stats */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-3xl p-6 text-white shadow-md flex items-center justify-between">
+                  <div>
+                    <p className="text-green-100 font-medium mb-1">Total Ganho</p>
+                    <p className="text-2xl font-bold">R$ {walletData.totalWinnings?.toFixed(2) || '0.00'}</p>
+                  </div>
+                  <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
+                    <TrendingUp className="w-6 h-6 text-white" />
+                  </div>
                 </div>
-                <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
-                  <Trophy className="w-6 h-6 text-white" />
+                <div className="bg-gradient-to-br from-amber-500 to-amber-600 rounded-3xl p-6 text-white shadow-md flex items-center justify-between">
+                  <div>
+                    <p className="text-amber-100 font-medium mb-1">Bônus 10 Acertos</p>
+                    <p className="text-2xl font-bold">R$ {currentRound?.jackpotPool?.toFixed(2) || '0.00'}</p>
+                  </div>
+                  <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
+                    <Trophy className="w-6 h-6 text-white" />
+                  </div>
                 </div>
-              </div>
-              <div className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm flex items-center justify-between cursor-pointer hover:shadow-md transition-all" onClick={() => onNavigate('wallet')}>
-                <div>
-                  <p className="text-gray-500 font-medium mb-1">Minha Carteira</p>
-                  <p className="text-xl font-bold text-primary">Ver Detalhes</p>
-                </div>
-                <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center">
-                  <Wallet className="w-6 h-6 text-primary" />
-                </div>
-              </div>
-              <div className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm flex items-center justify-between cursor-pointer hover:shadow-md transition-all" onClick={() => onNavigate('profile')}>
-                <div>
-                  <p className="text-gray-500 font-medium mb-1">Meu Perfil</p>
-                  <p className="text-xl font-bold text-primary">Editar Dados</p>
-                </div>
-                <div className="w-12 h-12 bg-secondary/10 rounded-full flex items-center justify-center">
-                  <UserIcon className="w-6 h-6 text-secondary" />
+                <div className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm flex items-center justify-between cursor-pointer hover:shadow-md transition-all" onClick={() => onNavigate('profile')}>
+                  <div>
+                    <p className="text-gray-500 font-medium mb-1">Meu Perfil</p>
+                    <p className="text-xl font-bold text-primary">Editar Dados</p>
+                  </div>
+                  <div className="w-12 h-12 bg-secondary/10 rounded-full flex items-center justify-center">
+                    <UserIcon className="w-6 h-6 text-secondary" />
+                  </div>
                 </div>
               </div>
             </div>
@@ -1482,6 +1748,16 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
           </div>
         </div>
       </div>
+
+      <DepositModal
+        isOpen={isDepositModalOpen}
+        onClose={() => setIsDepositModalOpen(false)}
+        token={token}
+        onDepositSuccess={() => {
+          setIsDepositModalOpen(false);
+          fetchData();
+        }}
+      />
     </div>
   );
 };
@@ -1507,6 +1783,9 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
     }
   }); // 1: Palpites, 2: Pagamento
 
+  const [walletBalance, setWalletBalance] = useState<number>(0);
+  const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
+
   useEffect(() => {
     localStorage.setItem('bolao10_predictions_list', JSON.stringify(predictionsList));
   }, [predictionsList]);
@@ -1515,23 +1794,40 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
     localStorage.setItem('bolao10_prediction_step', step.toString());
   }, [step]);
 
-  const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [showDeadlinePopup, setShowDeadlinePopup] = useState(false);
-  const [pendingPredictionIds, setPendingPredictionIds] = useState<number[]>(() => {
+
+  const fetchWalletBalance = async () => {
+    if (!token) return;
     try {
-      const saved = localStorage.getItem('bolao10_pending_ids');
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) {
-      return [];
+      const res = await fetch('/api/wallet/balance', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setWalletBalance(data.balance || 0);
+      }
+    } catch (err) {
+      console.error('Error fetching balance:', err);
     }
-  });
+  };
 
   useEffect(() => {
-    localStorage.setItem('bolao10_pending_ids', JSON.stringify(pendingPredictionIds));
-  }, [pendingPredictionIds]);
+    fetchWalletBalance();
+
+    const handleNewNotification = (e: any) => {
+      const notif = e.detail;
+      if (notif && notif.id && notif.id.startsWith('dep-app-')) {
+        fetchWalletBalance();
+      }
+    };
+
+    window.addEventListener('new_notification', handleNewNotification);
+    return () => {
+      window.removeEventListener('new_notification', handleNewNotification);
+    };
+  }, [token]);
 
   useEffect(() => {
     fetch('/api/rounds/current')
@@ -1546,10 +1842,8 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
         // Clear session if it's a different round
         const savedRoundId = localStorage.getItem('bolao10_current_round_id');
         if (savedRoundId && data && savedRoundId !== data.id.toString()) {
-          localStorage.removeItem('bolao10_pending_ids');
           localStorage.removeItem('bolao10_predictions_list');
           localStorage.removeItem('bolao10_prediction_step');
-          setPendingPredictionIds([]);
           setPredictionsList([]);
           setStep(1);
         }
@@ -1575,36 +1869,7 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
     setGuesses(prev => ({ ...prev, [gameId]: guess }));
   };
 
-  const savePrediction = async (currentGuesses: Record<number, string>) => {
-    if (!round?.id) {
-      alert('Erro: Rodada não identificada. Por favor, recarregue a página.');
-      return false;
-    }
-    const formData = new FormData();
-    formData.append('roundId', round.id.toString());
-    formData.append('guesses', JSON.stringify([currentGuesses]));
-
-    try {
-      const res = await fetch('/api/predictions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
-        body: formData
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setPendingPredictionIds(prev => [...prev, ...data.ids]);
-        return true;
-      } else {
-        alert(data.error || 'Erro ao salvar palpite');
-        return false;
-      }
-    } catch (err) {
-      alert('Erro ao salvar palpite');
-      return false;
-    }
-  };
-
-  const handleAddPrediction = async () => {
+  const handleAddPrediction = () => {
     if (round && round.start_time && new Date() > (parseDate(round.start_time) || new Date(0))) {
       setShowDeadlinePopup(true);
       return;
@@ -1613,89 +1878,72 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
       return alert('Por favor, complete todos os 10 palpites antes de adicionar outro.');
     }
     
-    setSubmitting(true);
-    const success = await savePrediction(guesses);
-    if (success) {
-      setPredictionsList(prev => [...prev, guesses]);
-      setGuesses({});
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-    setSubmitting(false);
+    setPredictionsList(prev => [...prev, guesses]);
+    setGuesses({});
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleProceedToPayment = async () => {
+  const handleProceedToPayment = () => {
     if (round && round.start_time && new Date() > (parseDate(round.start_time) || new Date(0))) {
       setShowDeadlinePopup(true);
       return;
     }
     
-    setSubmitting(true);
     if (Object.keys(guesses).length === 10) {
-      const success = await savePrediction(guesses);
-      if (success) {
-        setPredictionsList(prev => [...prev, guesses]);
-        setGuesses({});
-        setStep(2);
-      }
+      setPredictionsList(prev => [...prev, guesses]);
+      setGuesses({});
+      setStep(2);
     } else if (predictionsList.length > 0) {
       setStep(2);
     } else {
       alert('Complete seu palpite antes de prosseguir.');
     }
-    setSubmitting(false);
   };
+
+  const totalAmount = (predictionsList.length) * (round?.entry_value || 10);
 
   const handleSubmit = async () => {
     if (round && round.start_time && new Date() > (parseDate(round.start_time) || new Date(0))) {
       setShowDeadlinePopup(true);
       return;
     }
-    if (!file) return alert('Por favor, anexe o comprovante.');
+    
+    if (walletBalance < totalAmount) {
+      alert('Saldo insuficiente. Por favor, deposite fundos na sua carteira.');
+      setIsDepositModalOpen(true);
+      return;
+    }
+
     setSubmitting(true);
     
     const formData = new FormData();
-    formData.append('predictionIds', JSON.stringify(pendingPredictionIds));
-    formData.append('proof', file);
+    formData.append('roundId', round.id.toString());
+    formData.append('guesses', JSON.stringify(predictionsList));
 
     try {
-      const res = await fetch('/api/predictions/attach-proof', {
+      const res = await fetch('/api/predictions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData
       });
+      
+      const data = await res.json();
+      
       if (res.ok) {
-        alert('Comprovante enviado com sucesso! Aguarde a validação.');
-        localStorage.removeItem('bolao10_pending_ids');
+        alert('Palpites registrados com sucesso! O valor foi debitado da sua carteira.');
         localStorage.removeItem('bolao10_predictions_list');
         localStorage.removeItem('bolao10_prediction_step');
-        onNavigate('dashboard');
+        setPredictionsList([]);
+        setStep(1);
+        onNavigate('wallet');
       } else {
-        const data = await res.json();
-        alert(data.error || 'Erro ao enviar comprovante');
+        alert(data.error || 'Erro ao salvar palpites');
       }
     } catch (err) {
       alert('Erro de conexão');
     } finally {
       setSubmitting(false);
     }
-  };
-
-  const totalAmount = (predictionsList.length) * (round?.entry_value || 10);
-
-  const pixPayload = useMemo(() => {
-    if (totalAmount <= 0) return '';
-    return generatePixPayload(
-      'admin@bolao10.com',
-      'BOLAO10',
-      'SAO PAULO',
-      totalAmount
-    );
-  }, [totalAmount]);
-
-  const copyPix = () => {
-    navigator.clipboard.writeText(pixPayload);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   };
 
   if (loading) return <div className="flex justify-center items-center h-64">Carregando...</div>;
@@ -1727,9 +1975,7 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
               <button 
                 onClick={() => {
                   if(confirm('Deseja limpar todos os palpites salvos nesta sessão?')) {
-                    localStorage.removeItem('bolao10_pending_ids');
                     localStorage.removeItem('bolao10_predictions_list');
-                    setPendingPredictionIds([]);
                     setPredictionsList([]);
                   }
                 }}
@@ -1785,77 +2031,59 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
       ) : (
         <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
           <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm text-center">
-            <h3 className="text-xl font-bold text-primary mb-4">Pagamento via PIX</h3>
-            <p className="text-gray-600 mb-6">Para validar {predictionsList.length} palpite(s), realize o pagamento de <span className="font-bold text-primary">R$ {totalAmount.toFixed(2)}</span> utilizando o QR Code ou a chave Copia e Cola abaixo:</p>
-            
-            <div className="flex justify-center mb-6">
-              <div className="p-4 bg-white border-2 border-gray-100 rounded-2xl shadow-sm">
-                <QRCode value={pixPayload} size={200} />
+            <h3 className="text-xl font-bold text-primary mb-4">Confirmar Palpites</h3>
+            <p className="text-gray-600 mb-6">
+              Você está prestes a validar {predictionsList.length} palpite(s). O valor total de <span className="font-bold text-primary">R$ {totalAmount.toFixed(2)}</span> será debitado da sua carteira.
+            </p>
+
+            <div className="bg-gray-50 p-6 rounded-2xl mb-8 max-w-md mx-auto border border-gray-200">
+              <div className="flex justify-between items-center mb-4">
+                <span className="text-gray-600">Saldo Atual:</span>
+                <span className="font-bold text-lg text-gray-900">R$ {walletBalance.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between items-center mb-4">
+                <span className="text-gray-600">Valor a Pagar:</span>
+                <span className="font-bold text-lg text-red-600">- R$ {totalAmount.toFixed(2)}</span>
+              </div>
+              <div className="border-t border-gray-200 pt-4 flex justify-between items-center">
+                <span className="text-gray-900 font-medium">Saldo Final:</span>
+                <span className={`font-bold text-xl ${walletBalance >= totalAmount ? 'text-green-600' : 'text-red-600'}`}>
+                  R$ {(walletBalance - totalAmount).toFixed(2)}
+                </span>
               </div>
             </div>
 
-            <div className="bg-gray-50 p-4 rounded-2xl flex items-center justify-between mb-8 max-w-md mx-auto border border-gray-200">
-              <span className="font-mono text-sm text-gray-500 truncate mr-4">{pixPayload}</span>
-              <button onClick={copyPix} className="p-2 hover:bg-gray-200 rounded-lg transition-colors flex-shrink-0">
-                {copied ? <Check className="w-5 h-5 text-green-600" /> : <Copy className="w-5 h-5 text-gray-500" />}
+            {walletBalance < totalAmount && (
+              <div className="mb-8 p-4 bg-red-50 border border-red-200 rounded-2xl text-red-700 flex items-start text-left">
+                <AlertCircle className="w-5 h-5 mr-3 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold mb-1">Saldo Insuficiente</p>
+                  <p className="text-sm">Você precisa adicionar fundos à sua carteira para confirmar estes palpites.</p>
+                  <button 
+                    onClick={() => setIsDepositModalOpen(true)}
+                    className="mt-3 bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-red-700 transition-colors"
+                  >
+                    Depositar Agora
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-4 max-w-md mx-auto">
+              <button
+                onClick={() => setStep(1)}
+                className="flex-1 bg-gray-100 text-gray-700 py-4 rounded-2xl font-bold hover:bg-gray-200 transition-all"
+              >
+                Voltar
+              </button>
+              <button
+                disabled={submitting || walletBalance < totalAmount}
+                onClick={handleSubmit}
+                className="flex-[2] bg-secondary text-white py-4 rounded-2xl font-bold hover:shadow-lg transition-all disabled:opacity-50 flex items-center justify-center"
+              >
+                {submitting ? 'Processando...' : 'Confirmar e Pagar'}
               </button>
             </div>
-
-            <div className="space-y-4 text-left max-w-sm mx-auto">
-              <label className="block text-sm font-bold text-gray-700">Anexar Comprovante (Imagem ou PDF)</label>
-              <div className="relative">
-                <input 
-                  type="file" 
-                  accept="image/*,.pdf"
-                  onChange={(e) => setFile(e.target.files?.[0] || null)}
-                  className="hidden" 
-                  id="proof-upload"
-                />
-                <label 
-                  htmlFor="proof-upload"
-                  className="w-full flex items-center justify-center px-4 py-4 border-2 border-dashed border-gray-300 rounded-2xl cursor-pointer hover:border-secondary transition-colors"
-                >
-                  {file ? (
-                    <span className="text-secondary font-medium flex items-center">
-                      <CheckCircle2 className="w-5 h-5 mr-2" /> {file.name}
-                    </span>
-                  ) : (
-                    <span className="text-gray-500 flex items-center">
-                      <Upload className="w-5 h-5 mr-2" /> Selecionar Arquivo
-                    </span>
-                  )}
-                </label>
-              </div>
-            </div>
-
-            <div className="mt-8 pt-6 border-t border-gray-100 text-sm text-gray-500">
-              <p className="mb-3 font-medium text-gray-600">Problemas com o pagamento? Entre em contato:</p>
-              <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
-                <span className="text-gray-500 font-medium">Contato:</span>
-                <a href="mailto:admin@bolao10.com" className="text-blue-600 hover:text-blue-700 hover:underline flex items-center transition-colors bg-blue-50 p-3 rounded-full shadow-sm" title="admin@bolao10.com">
-                  <Mail className="w-5 h-5" />
-                </a>
-                <a href="https://wa.me/5521989886916" target="_blank" rel="noopener noreferrer" className="text-green-600 hover:text-green-700 hover:underline flex items-center transition-colors bg-green-50 p-3 rounded-full shadow-sm" title="(21) 98988-6916">
-                  <MessageCircle className="w-5 h-5" />
-                </a>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex gap-4">
-            <button
-              onClick={() => setStep(1)}
-              className="flex-1 bg-gray-100 text-gray-700 py-4 rounded-2xl font-bold hover:bg-gray-200 transition-all"
-            >
-              Voltar
-            </button>
-            <button
-              disabled={!file || submitting}
-              onClick={handleSubmit}
-              className="flex-[2] bg-secondary text-white py-4 rounded-2xl font-bold hover:shadow-lg transition-all disabled:opacity-50 flex items-center justify-center"
-            >
-              {submitting ? 'Enviando...' : 'Enviar Comprovante'}
-            </button>
           </div>
         </motion.div>
       )}
@@ -1886,6 +2114,16 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
           </motion.div>
         </div>
       )}
+
+      <DepositModal
+        isOpen={isDepositModalOpen}
+        onClose={() => setIsDepositModalOpen(false)}
+        token={token}
+        onDepositSuccess={() => {
+          setIsDepositModalOpen(false);
+          fetchWalletBalance();
+        }}
+      />
     </div>
   );
 };
@@ -1893,7 +2131,10 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
 const AdminDashboard = () => {
   const { token } = useAuth();
   const [pending, setPending] = useState<any[]>([]);
+  const [pendingDeposits, setPendingDeposits] = useState<any[]>([]);
+  const [pendingWithdrawals, setPendingWithdrawals] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
+  const [userWallets, setUserWallets] = useState<any[]>([]);
   const [financials, setFinancials] = useState<any[]>([]);
   const [financialDetails, setFinancialDetails] = useState<any>({ jackpotPool: 0, prizesHistory: [], withdrawalsHistory: [] });
   const [newWithdrawal, setNewWithdrawal] = useState({ amount: '', reason: '' });
@@ -1903,7 +2144,7 @@ const AdminDashboard = () => {
   const [viewingPrediction, setViewingPrediction] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [viewingProof, setViewingProof] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'pending' | 'users' | 'financial' | 'history' | 'notifications' | 'messages'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'deposits' | 'withdrawals' | 'users' | 'financial' | 'user-wallets' | 'history' | 'notifications' | 'messages'>('pending');
   const [roundHistory, setRoundHistory] = useState<any[]>([]);
   
   // Notification Form State
@@ -1927,12 +2168,42 @@ const AdminDashboard = () => {
     setPending(data);
   };
 
+  const fetchPendingDeposits = async () => {
+    const res = await fetch('/api/admin/deposits', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setPendingDeposits(data);
+    }
+  };
+
+  const fetchPendingWithdrawals = async () => {
+    const res = await fetch('/api/admin/pending-withdrawals', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setPendingWithdrawals(data);
+    }
+  };
+
   const fetchUsers = async () => {
     const res = await fetch('/api/admin/users', {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     const data = await res.json();
     setUsers(data);
+  };
+
+  const fetchUserWallets = async () => {
+    const res = await fetch('/api/admin/user-wallets', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setUserWallets(data);
+    }
   };
 
   const fetchFinancials = async () => {
@@ -1993,6 +2264,8 @@ const AdminDashboard = () => {
   useEffect(() => { 
     setLoading(true);
     const promises = [fetchPending()];
+    if (activeTab === 'deposits') promises.push(fetchPendingDeposits());
+    if (activeTab === 'withdrawals') promises.push(fetchPendingWithdrawals());
     if (activeTab === 'users' || activeTab === 'messages') promises.push(fetchUsers());
     if (activeTab === 'notifications') promises.push(fetchNotifications());
     if (activeTab === 'messages') promises.push(fetchSentNotifications());
@@ -2000,6 +2273,7 @@ const AdminDashboard = () => {
       promises.push(fetchFinancials());
       promises.push(fetchFinancialDetails());
     }
+    if (activeTab === 'user-wallets') promises.push(fetchUserWallets());
     if (activeTab === 'history') promises.push(fetchRoundHistory());
     Promise.all(promises).finally(() => setLoading(false));
   }, [token, activeTab]);
@@ -2014,6 +2288,39 @@ const AdminDashboard = () => {
       body: JSON.stringify({ status })
     });
     if (res.ok) fetchPending();
+  };
+
+  const handleValidateDeposit = async (id: number, status: 'approved' | 'rejected') => {
+    const res = await fetch(`/api/admin/deposits/${id}/approve`, {
+      method: 'POST',
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ status })
+    });
+    if (res.ok) fetchPendingDeposits();
+  };
+
+  const handleValidateWithdrawal = async (id: number, action: 'approve' | 'reject') => {
+    try {
+      const res = await fetch(`/api/admin/withdrawals/${id}/${action}`, {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      if (res.ok) {
+        toast.success(`Saque ${action === 'approve' ? 'aprovado' : 'rejeitado'} com sucesso!`);
+        fetchPendingWithdrawals();
+      } else {
+        const data = await res.json();
+        toast.error(data.error || 'Erro ao processar saque');
+      }
+    } catch (err) {
+      toast.error('Erro na conexão');
+    }
   };
 
   const handleUpdateUser = async (e: React.FormEvent) => {
@@ -2099,8 +2406,11 @@ const AdminDashboard = () => {
         <div className="flex bg-gray-100 p-1 rounded-xl overflow-x-auto max-w-full">
           {[
             { id: 'pending', label: 'Validações' },
+            { id: 'deposits', label: 'Depósitos' },
+            { id: 'withdrawals', label: 'Saques' },
             { id: 'users', label: 'Usuários' },
             { id: 'financial', label: 'Financeiro' },
+            { id: 'user-wallets', label: 'Carteiras' },
             { id: 'history', label: 'Histórico' },
             { id: 'notifications', label: 'Alertas' },
             { id: 'messages', label: 'Mensagens' }
@@ -2177,6 +2487,135 @@ const AdminDashboard = () => {
                     </td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'deposits' && (
+        <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-gray-100 bg-gray-50">
+            <h3 className="font-bold text-primary">Validação de Depósitos</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">
+                  <th className="px-6 py-4">Usuário</th>
+                  <th className="px-6 py-4">Data Envio</th>
+                  <th className="px-6 py-4">Valor</th>
+                  <th className="px-6 py-4">Comprovante</th>
+                  <th className="px-6 py-4">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {pendingDeposits.map((d) => (
+                  <tr key={d.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-6 py-4">
+                      <p className="font-bold text-primary">{d.user_name} ({d.user_nickname})</p>
+                      <p className="text-xs text-gray-500">{d.user_email}</p>
+                      {d.user_phone && <p className="text-xs text-gray-500">{d.user_phone}</p>}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{formatDate(d.created_at, 'dd/MM HH:mm')}</td>
+                    <td className="px-6 py-4 font-bold text-green-600">R$ {d.amount.toFixed(2)}</td>
+                    <td className="px-6 py-4">
+                      <button 
+                        onClick={() => setViewingProof(d.proof_url)}
+                        className="text-secondary hover:underline text-sm font-bold"
+                      >
+                        Ver Arquivo
+                      </button>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex space-x-2">
+                        <button 
+                          onClick={() => handleValidateDeposit(d.id, 'approved')}
+                          className="bg-green-100 text-green-600 px-3 py-1 rounded-lg text-xs font-bold hover:bg-green-200"
+                        >
+                          Aprovar
+                        </button>
+                        <button 
+                          onClick={() => handleValidateDeposit(d.id, 'rejected')}
+                          className="bg-red-100 text-red-600 px-3 py-1 rounded-lg text-xs font-bold hover:bg-red-200"
+                        >
+                          Rejeitar
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {pendingDeposits.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                      Nenhum depósito pendente de validação.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'withdrawals' && (
+        <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+            <h3 className="font-bold text-primary">Saques Pendentes</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">
+                  <th className="px-6 py-4">Usuário</th>
+                  <th className="px-6 py-4">Data Solicitação</th>
+                  <th className="px-6 py-4">Valor</th>
+                  <th className="px-6 py-4">Chave PIX</th>
+                  <th className="px-6 py-4">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {pendingWithdrawals.map((w) => (
+                  <tr key={w.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-6 py-4">
+                      <p className="font-bold text-primary">{w.user_name} ({w.user_nickname})</p>
+                    </td>
+                    <td className="px-6 py-4 text-gray-600">
+                      {new Date(w.created_at).toLocaleString('pt-BR')}
+                    </td>
+                    <td className="px-6 py-4 font-bold text-gray-900">
+                      R$ {w.amount.toFixed(2)}
+                    </td>
+                    <td className="px-6 py-4 font-mono text-sm text-gray-600">
+                      {w.description?.replace('Saque PIX: ', '') || '-'}
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={() => handleValidateWithdrawal(w.id, 'approve')}
+                          className="bg-green-100 text-green-700 px-3 py-1 rounded-lg font-bold hover:bg-green-200 transition-colors flex items-center"
+                        >
+                          <CheckCircle className="w-4 h-4 mr-1" />
+                          Aprovar
+                        </button>
+                        <button
+                          onClick={() => handleValidateWithdrawal(w.id, 'reject')}
+                          className="bg-red-100 text-red-700 px-3 py-1 rounded-lg font-bold hover:bg-red-200 transition-colors flex items-center"
+                        >
+                          <XCircle className="w-4 h-4 mr-1" />
+                          Rejeitar
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {pendingWithdrawals.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                      Nenhum saque pendente.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -2443,6 +2882,80 @@ const AdminDashboard = () => {
                   ))
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'user-wallets' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-3xl shadow-sm overflow-hidden border border-gray-100">
+            <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+              <h3 className="text-xl font-bold text-primary flex items-center gap-2">
+                <Wallet className="w-6 h-6 text-blue-500" />
+                Carteiras dos Usuários
+              </h3>
+              <button onClick={fetchUserWallets} className="text-sm text-blue-500 hover:underline">
+                Atualizar
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
+                    <th className="px-6 py-4 font-semibold">Usuário</th>
+                    <th className="px-6 py-4 font-semibold">Saldo Atual</th>
+                    <th className="px-6 py-4 font-semibold">Total Depositado</th>
+                    <th className="px-6 py-4 font-semibold">Total Ganho</th>
+                    <th className="px-6 py-4 font-semibold">Saques</th>
+                    <th className="px-6 py-4 font-semibold">Histórico de Depósitos</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {userWallets.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-6 py-8 text-center text-gray-400">Nenhuma carteira encontrada.</td>
+                    </tr>
+                  ) : (
+                    userWallets.map((uw: any) => (
+                      <tr key={uw.user.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-6 py-4">
+                          <p className="font-bold text-primary">{uw.user.name}</p>
+                          <p className="text-xs text-gray-500">{uw.user.email}</p>
+                          {uw.user.nickname && <p className="text-xs text-blue-500">@{uw.user.nickname}</p>}
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="font-bold text-green-600">R$ {uw.balance.toFixed(2)}</span>
+                        </td>
+                        <td className="px-6 py-4 text-gray-600">R$ {uw.totalDeposited.toFixed(2)}</td>
+                        <td className="px-6 py-4 text-blue-600">R$ {uw.totalWinnings.toFixed(2)}</td>
+                        <td className="px-6 py-4 text-red-500">R$ {uw.totalWithdrawn.toFixed(2)}</td>
+                        <td className="px-6 py-4">
+                          {uw.deposits.length === 0 ? (
+                            <span className="text-xs text-gray-400">Sem depósitos</span>
+                          ) : (
+                            <div className="space-y-1 max-h-32 overflow-y-auto pr-2">
+                              {uw.deposits.map((d: any) => (
+                                <div key={d.id} className="text-xs flex justify-between items-center bg-gray-100 p-2 rounded">
+                                  <span>{formatDate(d.created_at, 'dd/MM/yy')}</span>
+                                  <span className="font-bold">R$ {d.amount.toFixed(2)}</span>
+                                  <span className={`px-2 py-0.5 rounded-full text-[10px] ${
+                                    d.status === 'approved' ? 'bg-green-100 text-green-700' :
+                                    d.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                                    'bg-yellow-100 text-yellow-700'
+                                  }`}>
+                                    {d.status === 'approved' ? 'Aprovado' : d.status === 'rejected' ? 'Rejeitado' : 'Pendente'}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -3656,6 +4169,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col">
+      <Toaster position="top-right" richColors />
       <Navbar onNavigate={setPage} currentPage={page} />
       <main className="flex-grow">
         <AnimatePresence mode="wait">
