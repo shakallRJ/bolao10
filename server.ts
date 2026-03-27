@@ -444,6 +444,21 @@ app.get('/api/my-wallet', authenticate, async (req: any, res) => {
       console.error('Supabase error fetching deposits:', depositsError);
     }
 
+    // Get user's wallet ID
+    const { data: wallet } = await supabase.from('wallets').select('id').eq('user_id', req.user.id).single();
+
+    let pendingWithdrawals: any[] = [];
+    if (wallet) {
+      const { data: withdrawalsData } = await supabase
+        .from('wallet_transactions')
+        .select('*')
+        .eq('wallet_id', wallet.id)
+        .eq('type', 'withdrawal')
+        .like('reference_id', 'pending_%');
+      
+      pendingWithdrawals = withdrawalsData || [];
+    }
+
     const { data: historySetting } = await supabase.from('settings').select('value').eq('key', 'jackpot_history').maybeSingle();
     let jackpotHistory: any[] = [];
     try {
@@ -479,7 +494,7 @@ app.get('/api/my-wallet', authenticate, async (req: any, res) => {
       }
     });
 
-    res.json({ totalSpent, predictionsMade, totalWinnings, pendingPredictions, pendingDeposits });
+    res.json({ totalSpent, predictionsMade, totalWinnings, pendingPredictions, pendingDeposits, pendingWithdrawals });
   } catch (err) {
     console.error('Wallet error:', err);
     res.status(500).json({ error: 'Falha ao buscar resumo financeiro' });
@@ -794,9 +809,10 @@ app.post('/api/wallet/withdraw', authenticate, async (req: any, res) => {
       .insert([{
         wallet_id: wallet.id,
         amount: -withdrawAmount,
-        type: 'withdrawal_request',
-        description: `Pedido de Saque (PIX: ${pixKey})`,
-        status: 'pending'
+        type: 'withdrawal',
+        balance_after: newBalance,
+        reference_id: `pending_${pixKey}`,
+        description: `Pedido de Saque (PIX: ${pixKey})`
       }]);
 
     if (transErr) throw transErr;
@@ -821,7 +837,7 @@ app.post('/api/wallet/withdraw', authenticate, async (req: any, res) => {
 
     res.json({ success: true, newBalance });
   } catch (err: any) {
-    console.error('Withdrawal error:', err);
+    console.error('Withdrawal error:', JSON.stringify(err, null, 2));
     res.status(500).json({ error: 'Erro ao solicitar saque' });
   }
 });
@@ -1451,8 +1467,8 @@ app.get('/api/admin/pending-withdrawals', authenticate, isAdmin, async (req, res
           users (name, email, nickname, phone)
         )
       `)
-      .eq('type', 'withdrawal_request')
-      .eq('status', 'pending')
+      .eq('type', 'withdrawal')
+      .like('reference_id', 'pending_%')
       .order('created_at', { ascending: false });
 
     const formatted = withdrawals?.map((w: any) => ({
@@ -1461,7 +1477,8 @@ app.get('/api/admin/pending-withdrawals', authenticate, isAdmin, async (req, res
       user_nickname: w.wallets?.users?.nickname,
       user_email: w.wallets?.users?.email,
       user_phone: w.wallets?.users?.phone,
-      user_id: w.wallets?.user_id
+      user_id: w.wallets?.user_id,
+      pix_key: w.reference_id?.replace('pending_', '')
     })) || [];
 
     res.json(formatted);
@@ -1471,7 +1488,7 @@ app.get('/api/admin/pending-withdrawals', authenticate, isAdmin, async (req, res
   }
 });
 
-app.post('/api/admin/withdrawals/:id/approve', authenticate, isAdmin, async (req, res) => {
+app.post('/api/admin/withdrawals/:id/approve', authenticate, isAdmin, async (req: any, res) => {
   try {
     // 1. Get transaction
     const { data: transaction } = await supabase
@@ -1481,12 +1498,12 @@ app.post('/api/admin/withdrawals/:id/approve', authenticate, isAdmin, async (req
       .single();
 
     if (!transaction) return res.status(404).json({ error: 'Saque não encontrado' });
-    if (transaction.status !== 'pending') return res.status(400).json({ error: 'Saque já processado' });
+    if (!transaction.reference_id?.startsWith('pending_')) return res.status(400).json({ error: 'Saque já processado' });
 
     // 2. Update transaction status
     const { error: updateErr } = await supabase
       .from('wallet_transactions')
-      .update({ status: 'completed' })
+      .update({ reference_id: transaction.reference_id.replace('pending_', 'completed_') })
       .eq('id', req.params.id);
 
     if (updateErr) throw updateErr;
@@ -1511,7 +1528,7 @@ app.post('/api/admin/withdrawals/:id/approve', authenticate, isAdmin, async (req
   }
 });
 
-app.post('/api/admin/withdrawals/:id/reject', authenticate, isAdmin, async (req, res) => {
+app.post('/api/admin/withdrawals/:id/reject', authenticate, isAdmin, async (req: any, res) => {
   try {
     // 1. Get transaction
     const { data: transaction } = await supabase
@@ -1521,7 +1538,7 @@ app.post('/api/admin/withdrawals/:id/reject', authenticate, isAdmin, async (req,
       .single();
 
     if (!transaction) return res.status(404).json({ error: 'Saque não encontrado' });
-    if (transaction.status !== 'pending') return res.status(400).json({ error: 'Saque já processado' });
+    if (!transaction.reference_id?.startsWith('pending_')) return res.status(400).json({ error: 'Saque já processado' });
 
     // 2. Refund wallet
     const newBalance = transaction.wallets.balance + Math.abs(transaction.amount);
@@ -1530,12 +1547,22 @@ app.post('/api/admin/withdrawals/:id/reject', authenticate, isAdmin, async (req,
     // 3. Update transaction status
     const { error: updateErr } = await supabase
       .from('wallet_transactions')
-      .update({ status: 'rejected' })
+      .update({ reference_id: transaction.reference_id.replace('pending_', 'rejected_') })
       .eq('id', req.params.id);
 
     if (updateErr) throw updateErr;
 
-    // 4. Notify user
+    // 4. Record refund transaction
+    await supabase.from('wallet_transactions').insert([{
+      wallet_id: transaction.wallets.id,
+      amount: Math.abs(transaction.amount),
+      type: 'admin_adjustment',
+      balance_after: newBalance,
+      reference_id: `refund_${req.params.id}`,
+      description: `Estorno de Saque Rejeitado`
+    }]);
+
+    // 5. Notify user
     sendRealtimeNotification(transaction.wallets.user_id, {
       type: 'notification',
       data: {

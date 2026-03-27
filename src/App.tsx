@@ -39,7 +39,8 @@ import {
   Edit,
   ChevronDown,
   ChevronUp,
-  PlusCircle
+  PlusCircle,
+  XCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -69,6 +70,16 @@ const formatDate = (date: any, formatStr: string, options?: any) => {
   const d = parseDate(date);
   if (!d || isNaN(d.getTime())) return '-';
   return format(d, formatStr, options);
+};
+
+export const safeJson = async (res: Response) => {
+  const text = await res.text();
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch (e) {
+    console.error(`JSON parse error for ${res.url}. Status: ${res.status}. Text: ${text.substring(0, 200)}`);
+    throw new Error(`Invalid JSON response from ${res.url}`);
+  }
 };
 
 const NotificationsDropdown = () => {
@@ -724,14 +735,14 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
       
       if (!walletRes.ok || !predRes.ok) throw new Error('Falha ao carregar resumo financeiro');
       
-      const wData = await walletRes.json();
-      const pData = await predRes.json();
-      const bData = await balanceRes.json();
-      const tData = await transRes.json();
+      const wData = await safeJson(walletRes);
+      const pData = await safeJson(predRes);
+      const bData = await safeJson(balanceRes);
+      const tData = await safeJson(transRes);
       
       setWalletData(wData);
       setMyPredictions(pData);
-      setBalance(bData.balance || 0);
+      setBalance(bData?.balance || 0);
       setTransactions(tData || []);
     } catch (err: any) {
       setError(err.message);
@@ -745,7 +756,12 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
 
     const handleNewNotification = (e: any) => {
       const notif = e.detail;
-      if (notif && notif.id && (notif.id.startsWith('dep-app-') || notif.id.startsWith('dep-rej-'))) {
+      if (notif && notif.id && (
+        notif.id.startsWith('dep-app-') || 
+        notif.id.startsWith('dep-rej-') ||
+        notif.id.startsWith('withdraw-app-') ||
+        notif.id.startsWith('withdraw-rej-')
+      )) {
         fetchWallet();
       }
     };
@@ -855,7 +871,7 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
             <div className="bg-gradient-to-br from-primary to-primary/80 rounded-2xl p-6 border border-gray-100 text-white shadow-md flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-4">
@@ -905,15 +921,35 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
                 </p>
               </div>
             </div>
+          </div>
 
-            <div className="bg-gray-50 rounded-2xl p-6 border border-gray-100 flex flex-col justify-between">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-orange-50 rounded-2xl p-6 border border-orange-100 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-gray-500 font-medium">Depósitos Pendentes</h3>
+                  <h3 className="text-orange-800 font-medium">Depósitos Pendentes</h3>
                   <Clock className="w-5 h-5 text-orange-500" />
                 </div>
                 <p className="text-3xl font-bold text-orange-600">
                   R$ {(walletData?.pendingDeposits?.reduce((acc: number, d: any) => acc + d.amount, 0) || 0).toFixed(2)}
+                </p>
+                <p className="text-sm text-orange-700 mt-2">
+                  {walletData?.pendingDeposits?.length || 0} solicitação(ões) em análise
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-blue-50 rounded-2xl p-6 border border-blue-100 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-blue-800 font-medium">Saques Pendentes</h3>
+                  <Clock className="w-5 h-5 text-blue-500" />
+                </div>
+                <p className="text-3xl font-bold text-blue-600">
+                  R$ {(walletData?.pendingWithdrawals?.reduce((acc: number, d: any) => acc + Math.abs(d.amount), 0) || 0).toFixed(2)}
+                </p>
+                <p className="text-sm text-blue-700 mt-2">
+                  {walletData?.pendingWithdrawals?.length || 0} solicitação(ões) em análise
                 </p>
               </div>
             </div>
@@ -963,6 +999,45 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
                       </div>
                     </div>
                   </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {walletData?.pendingDeposits?.length > 0 && (
+          <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 md:p-8 mb-8">
+            <h3 className="text-xl font-bold text-orange-600 mb-6 flex items-center">
+              <Clock className="w-5 h-5 mr-2" /> Depósitos em Análise
+            </h3>
+            <div className="space-y-4">
+              {walletData.pendingDeposits.map((d: any) => (
+                <div key={d.id} className="p-4 bg-orange-50 border border-orange-100 rounded-2xl flex justify-between items-center">
+                  <div>
+                    <p className="font-bold text-orange-800">Depósito via PIX</p>
+                    <p className="text-xs text-orange-500 mt-1">Solicitado em: {formatDate(d.created_at, 'dd/MM/yyyy HH:mm')}</p>
+                  </div>
+                  <p className="font-bold text-orange-600">R$ {d.amount.toFixed(2)}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {walletData?.pendingWithdrawals?.length > 0 && (
+          <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 md:p-8 mb-8">
+            <h3 className="text-xl font-bold text-blue-600 mb-6 flex items-center">
+              <Clock className="w-5 h-5 mr-2" /> Saques em Análise
+            </h3>
+            <div className="space-y-4">
+              {walletData.pendingWithdrawals.map((w: any) => (
+                <div key={w.id} className="p-4 bg-blue-50 border border-blue-100 rounded-2xl flex justify-between items-center">
+                  <div>
+                    <p className="font-bold text-blue-800">Saque PIX</p>
+                    <p className="text-sm text-blue-600">Chave: {w.reference_id?.replace('pending_', '')}</p>
+                    <p className="text-xs text-blue-500 mt-1">Solicitado em: {formatDate(w.created_at, 'dd/MM/yyyy HH:mm')}</p>
+                  </div>
+                  <p className="font-bold text-blue-600">R$ {Math.abs(w.amount).toFixed(2)}</p>
                 </div>
               ))}
             </div>
@@ -1417,26 +1492,27 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
       }
 
       if (!roundRes.ok) {
-        const errorData = await roundRes.json().catch(() => ({}));
-        throw new Error(`Erro ao carregar rodada: ${errorData.error || roundRes.statusText}`);
+        const errorData = await safeJson(roundRes).catch(() => ({}));
+        throw new Error(`Erro ao carregar rodada: ${errorData?.error || roundRes.statusText}`);
       }
       if (!predRes.ok) {
-        const errorData = await predRes.json().catch(() => ({}));
-        throw new Error(`Erro ao carregar palpites: ${errorData.error || predRes.statusText}`);
+        const errorData = await safeJson(predRes).catch(() => ({}));
+        throw new Error(`Erro ao carregar palpites: ${errorData?.error || predRes.statusText}`);
       }
       if (!walletRes.ok) {
-        const errorData = await walletRes.json().catch(() => ({}));
-        throw new Error(`Erro ao carregar carteira: ${errorData.error || walletRes.statusText}`);
+        const errorData = await safeJson(walletRes).catch(() => ({}));
+        throw new Error(`Erro ao carregar carteira: ${errorData?.error || walletRes.statusText}`);
       }
 
-      const roundData = await roundRes.json();
-      const predData = await predRes.json();
-      const walletData = await walletRes.json();
-      const balanceData = await balanceRes.json().catch(() => ({ balance: 0 }));
+      const roundData = await safeJson(roundRes);
+      const predData = await safeJson(predRes);
+      const walletData = await safeJson(walletRes);
+      const balanceData = await safeJson(balanceRes).catch(() => ({ balance: 0 }));
+      
       setCurrentRound(roundData);
       setMyPredictions(predData);
       setWalletData(walletData);
-      setBalance(balanceData.balance || 0);
+      setBalance(balanceData?.balance || 0);
     } catch (err: any) {
       console.error('Dashboard error:', err);
       setError(err.message);
@@ -1450,7 +1526,12 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
 
     const handleNewNotification = (e: any) => {
       const notif = e.detail;
-      if (notif && notif.id && (notif.id.startsWith('dep-app-') || notif.id.startsWith('dep-rej-'))) {
+      if (notif && notif.id && (
+        notif.id.startsWith('dep-app-') || 
+        notif.id.startsWith('dep-rej-') ||
+        notif.id.startsWith('withdraw-app-') ||
+        notif.id.startsWith('withdraw-rej-')
+      )) {
         fetchData();
       }
     };
@@ -1490,13 +1571,6 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
           <p className="text-gray-500">Bem-vindo de volta ao Bolão10.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={() => setIsDepositModalOpen(true)}
-            className="flex items-center gap-2 bg-primary text-white px-6 py-3 rounded-2xl font-bold hover:bg-primary-dark transition-all shadow-md hover:shadow-lg w-fit"
-          >
-            <PlusCircle className="w-5 h-5" />
-            Depositar
-          </button>
           <a 
             href="https://chat.whatsapp.com/LWJCq74sKbvGav8mYX6Kx7?mode=gi_t" 
             target="_blank" 
@@ -1818,7 +1892,12 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
 
     const handleNewNotification = (e: any) => {
       const notif = e.detail;
-      if (notif && notif.id && notif.id.startsWith('dep-app-')) {
+      if (notif && notif.id && (
+        notif.id.startsWith('dep-app-') || 
+        notif.id.startsWith('dep-rej-') ||
+        notif.id.startsWith('withdraw-app-') ||
+        notif.id.startsWith('withdraw-rej-')
+      )) {
         fetchWalletBalance();
       }
     };
@@ -2276,6 +2355,19 @@ const AdminDashboard = () => {
     if (activeTab === 'user-wallets') promises.push(fetchUserWallets());
     if (activeTab === 'history') promises.push(fetchRoundHistory());
     Promise.all(promises).finally(() => setLoading(false));
+
+    const handleNewNotification = (e: any) => {
+      const notif = e.detail;
+      if (notif && notif.id) {
+        if (notif.id.startsWith('dep-req-') && activeTab === 'deposits') fetchPendingDeposits();
+        if (notif.id.startsWith('withdraw-req-') && activeTab === 'withdrawals') fetchPendingWithdrawals();
+      }
+    };
+
+    window.addEventListener('new_notification', handleNewNotification);
+    return () => {
+      window.removeEventListener('new_notification', handleNewNotification);
+    };
   }, [token, activeTab]);
 
   const handleValidate = async (id: number, status: 'approved' | 'rejected') => {
@@ -2584,10 +2676,10 @@ const AdminDashboard = () => {
                       {new Date(w.created_at).toLocaleString('pt-BR')}
                     </td>
                     <td className="px-6 py-4 font-bold text-gray-900">
-                      R$ {w.amount.toFixed(2)}
+                      R$ {Math.abs(w.amount).toFixed(2)}
                     </td>
                     <td className="px-6 py-4 font-mono text-sm text-gray-600">
-                      {w.description?.replace('Saque PIX: ', '') || '-'}
+                      {w.pix_key || '-'}
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex space-x-2">
@@ -3409,20 +3501,20 @@ const TransparencyPage = () => {
       const accessRes = await fetch(`/api/rounds/${selectedRoundId}/check-prediction`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      const accessData = await accessRes.json();
-      const userHasAccess = accessData.hasPrediction || isAdmin;
+      const accessData = await safeJson(accessRes);
+      const userHasAccess = accessData?.hasPrediction || isAdmin;
       setHasAccess(userHasAccess);
 
       if (userHasAccess) {
         // Fetch round details including games
         const roundRes = await fetch(`/api/rounds/${selectedRoundId}`);
-        const roundData = await roundRes.json();
+        const roundData = await safeJson(roundRes);
         setRound(roundData);
 
         const transRes = await fetch(`/api/rounds/${selectedRoundId}/transparency`);
         if (transRes.ok) {
-          const transData = await transRes.json();
-          setPredictions(transData);
+          const transData = await safeJson(transRes);
+          setPredictions(transData || []);
         }
       }
       setLoading(false);
