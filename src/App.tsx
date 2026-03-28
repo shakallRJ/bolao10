@@ -4044,10 +4044,12 @@ const AdminRoundsPage = () => {
 };
 
 const RankingPage = () => {
+  const { token, isAdmin } = useAuth();
   const [rounds, setRounds] = useState<any[]>([]);
   const [selectedRoundId, setSelectedRoundId] = useState<string>('');
   const [ranking, setRanking] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasAccess, setHasAccess] = useState(false);
 
   useEffect(() => {
     const fetchRounds = async () => {
@@ -4063,19 +4065,30 @@ const RankingPage = () => {
 
   useEffect(() => {
     if (!selectedRoundId) return;
-    const fetchRanking = async () => {
+    const fetchData = async () => {
       setLoading(true);
-      const res = await fetch(`/api/rounds/${selectedRoundId}/transparency`);
-      if (res.ok) {
-        const data = await res.json();
-        // Sort by score descending
-        const sorted = data.sort((a: any, b: any) => b.score - a.score);
-        setRanking(sorted);
+      
+      // Check access
+      const accessRes = await fetch(`/api/rounds/${selectedRoundId}/check-prediction`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const accessData = await safeJson(accessRes);
+      const userHasAccess = accessData?.hasPrediction || isAdmin;
+      setHasAccess(userHasAccess);
+
+      if (userHasAccess) {
+        const res = await fetch(`/api/rounds/${selectedRoundId}/transparency`);
+        if (res.ok) {
+          const data = await res.json();
+          // Sort by score descending
+          const sorted = data.sort((a: any, b: any) => b.score - a.score);
+          setRanking(sorted);
+        }
       }
       setLoading(false);
     };
-    fetchRanking();
-  }, [selectedRoundId]);
+    fetchData();
+  }, [selectedRoundId, token, isAdmin]);
 
   if (loading && rounds.length === 0) return <div className="p-8">Carregando...</div>;
 
@@ -4101,50 +4114,60 @@ const RankingPage = () => {
         </div>
       </div>
 
-      <div className="bg-white rounded-[40px] border border-gray-100 shadow-sm overflow-hidden">
-        <table className="w-full text-left">
-          <thead>
-            <tr className="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">
-              <th className="px-8 py-5">Posição</th>
-              <th className="px-8 py-5">Usuário</th>
-              <th className="px-8 py-5 text-right">Pontuação</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {ranking.map((item, index) => (
-              <tr key={item.id} className="hover:bg-gray-50 transition-colors">
-                <td className="px-8 py-5">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
-                    index === 0 ? 'bg-yellow-100 text-yellow-700' : 
-                    index === 1 ? 'bg-gray-100 text-gray-700' :
-                    index === 2 ? 'bg-orange-100 text-orange-700' : 'text-gray-400'
-                  }`}>
-                    {index + 1}º
-                  </div>
-                </td>
-                <td className="px-8 py-5 font-bold text-primary">{item.user_name}</td>
-                <td className="px-8 py-5 text-right">
-                  <div className="flex flex-col items-end">
-                    <span className={`${selectedRound?.status === 'finished' ? 'bg-secondary text-white' : 'bg-blue-100 text-blue-700'} px-4 py-1 rounded-full font-bold`}>
-                      {item.score !== null && item.score !== undefined ? `${item.score} pts` : '0 pts'}
-                    </span>
-                    {selectedRound?.status !== 'finished' && (
-                      <span className="text-[10px] font-bold text-blue-500 uppercase mt-1">Parcial</span>
-                    )}
-                  </div>
-                </td>
+      {!hasAccess ? (
+        <div className="bg-white p-12 rounded-[40px] border border-dashed border-gray-200 text-center">
+          <ShieldCheck className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+          <h3 className="text-xl font-bold text-primary mb-2">Acesso Restrito</h3>
+          <p className="text-gray-500 max-w-md mx-auto">
+            Você só pode visualizar o ranking de rodadas em que possui palpites validados.
+          </p>
+        </div>
+      ) : (
+        <div className="bg-white rounded-[40px] border border-gray-100 shadow-sm overflow-hidden">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">
+                <th className="px-8 py-5">Posição</th>
+                <th className="px-8 py-5">Usuário</th>
+                <th className="px-8 py-5 text-right">Pontuação</th>
               </tr>
-            ))}
-            {ranking.length === 0 && !loading && (
-              <tr>
-                <td colSpan={3} className="px-8 py-20 text-center text-gray-500">
-                  Nenhum resultado disponível para esta rodada.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {ranking.map((item, index) => (
+                <tr key={item.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-8 py-5">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
+                      index === 0 ? 'bg-yellow-100 text-yellow-700' : 
+                      index === 1 ? 'bg-gray-100 text-gray-700' :
+                      index === 2 ? 'bg-orange-100 text-orange-700' : 'text-gray-400'
+                    }`}>
+                      {index + 1}º
+                    </div>
+                  </td>
+                  <td className="px-8 py-5 font-bold text-primary">{item.user_name}</td>
+                  <td className="px-8 py-5 text-right">
+                    <div className="flex flex-col items-end">
+                      <span className={`${selectedRound?.status === 'finished' ? 'bg-secondary text-white' : 'bg-blue-100 text-blue-700'} px-4 py-1 rounded-full font-bold`}>
+                        {item.score !== null && item.score !== undefined ? `${item.score} pts` : '0 pts'}
+                      </span>
+                      {selectedRound?.status !== 'finished' && (
+                        <span className="text-[10px] font-bold text-blue-500 uppercase mt-1">Parcial</span>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {ranking.length === 0 && !loading && (
+                <tr>
+                  <td colSpan={3} className="px-8 py-20 text-center text-gray-500">
+                    Nenhum resultado disponível para esta rodada.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 };
