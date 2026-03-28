@@ -1,13 +1,17 @@
 import React, { useState, useMemo } from 'react';
-import { X, Copy, Check, Upload, AlertCircle } from 'lucide-react';
+import { X, Copy, Check, Upload, AlertCircle, MessageCircle } from 'lucide-react';
 import { generatePixPayload } from '../utils/pix';
 import QRCode from 'react-qr-code';
+import { useAuth } from '../contexts/AuthContext';
+import { toast } from 'sonner';
 
 export const DepositModal = ({ isOpen, onClose, token, onDepositSuccess }: any) => {
+  const { user } = useAuth();
   const [amount, setAmount] = useState<string>('');
   const [step, setStep] = useState<number>(1);
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  const [validating, setValidating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 

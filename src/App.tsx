@@ -315,6 +315,7 @@ const Navbar = ({ onNavigate, currentPage }: { onNavigate: (page: string) => voi
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, show: !!user },
     { id: 'predictions', label: 'Fazer Palpite', icon: Trophy, show: !!user && !isAdmin },
     { id: 'wallet', label: 'Minha Carteira', icon: Wallet, show: !!user && !isAdmin },
+    { id: 'referral', label: 'Indique e Ganhe', icon: Users, show: !!user && !isAdmin },
     { id: 'profile', label: 'Meu Perfil', icon: UserIcon, show: !!user },
     { id: 'transparency', label: 'Transparência', icon: ShieldCheck, show: !!user },
     { id: 'ranking', label: 'Ranking', icon: BarChart2, show: !!user },
@@ -526,7 +527,10 @@ const LoginPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
     setError('');
     setSuccess('');
     const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
-    const body = isRegister ? { email, password, name, nickname, phone } : { email, password };
+    const referralCode = isRegister ? sessionStorage.getItem('referredBy') : null;
+    const body = isRegister 
+      ? { email, password, name, nickname, phone, referralCode } 
+      : { email, password };
 
     try {
       const res = await fetch(endpoint, {
@@ -2210,6 +2214,170 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
   );
 };
 
+const ReferralPage = () => {
+  const { token, user } = useAuth();
+  const [referralInfo, setReferralInfo] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  const fetchReferralInfo = async () => {
+    try {
+      const res = await fetch('/api/user/referral-info', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setReferralInfo(await res.json());
+      }
+    } catch (err) {
+      console.error('Error fetching referral info:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchReferralInfo();
+  }, [token]);
+
+  const referralLink = `${window.location.origin}/?ref=${referralInfo?.referral_code}`;
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(referralLink);
+    toast.success('Link de indicação copiado!');
+  };
+
+  if (loading) return <div className="flex justify-center items-center h-64">Carregando...</div>;
+
+  return (
+    <div className="max-w-4xl mx-auto px-4 py-8">
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }} 
+        animate={{ opacity: 1, y: 0 }}
+        className="space-y-8"
+      >
+        <div className="text-center">
+          <h2 className="text-4xl font-bold text-primary mb-4">Indique e Ganhe</h2>
+          <p className="text-gray-600 max-w-2xl mx-auto">
+            Convide seus amigos para o Bolão 10 e ganhe <span className="font-bold text-secondary">R$ 2,00</span> por cada amigo que fizer o primeiro depósito de pelo menos R$ 10,00.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm text-center">
+            <Users className="w-8 h-8 text-blue-500 mx-auto mb-4" />
+            <div className="text-2xl font-bold text-gray-900">{referralInfo?.total_referred || 0}</div>
+            <div className="text-sm text-gray-500 uppercase tracking-wider font-bold">Amigos Indicados</div>
+          </div>
+          <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm text-center">
+            <CheckCircle className="w-8 h-8 text-green-500 mx-auto mb-4" />
+            <div className="text-2xl font-bold text-gray-900">{referralInfo?.paid_referrals || 0}</div>
+            <div className="text-sm text-gray-500 uppercase tracking-wider font-bold">Indicações Pagas</div>
+          </div>
+          <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm text-center">
+            <Wallet className="w-8 h-8 text-secondary mx-auto mb-4" />
+            <div className="text-2xl font-bold text-gray-900">R$ {(referralInfo?.total_bonus || 0).toFixed(2)}</div>
+            <div className="text-sm text-gray-500 uppercase tracking-wider font-bold">Bônus Recebido</div>
+          </div>
+        </div>
+
+        <div className="bg-primary text-white p-8 rounded-3xl shadow-xl relative overflow-hidden">
+          <div className="relative z-10">
+            <h3 className="text-2xl font-bold mb-4">Seu Link de Indicação</h3>
+            <p className="text-white/80 mb-6">Compartilhe este link com seus amigos para começar a ganhar.</p>
+            
+            <div className="flex flex-col sm:flex-row gap-4">
+              <div className="flex-1 bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-4 font-mono text-sm break-all">
+                {referralLink}
+              </div>
+              <button 
+                onClick={copyToClipboard}
+                className="bg-secondary text-white px-8 py-4 rounded-2xl font-bold hover:shadow-lg transition-all flex items-center justify-center gap-2"
+              >
+                <Copy className="w-5 h-5" />
+                Copiar Link
+              </button>
+            </div>
+          </div>
+          <div className="absolute top-0 right-0 -mt-8 -mr-8 w-64 h-64 bg-white/5 rounded-full blur-3xl" />
+        </div>
+
+        <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm">
+          <h3 className="text-xl font-bold text-primary mb-6 flex items-center gap-2">
+            <Gift className="w-6 h-6 text-secondary" />
+            Como funciona?
+          </h3>
+          <div className="space-y-6">
+            <div className="flex gap-4">
+              <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center font-bold flex-shrink-0">1</div>
+              <div>
+                <h4 className="font-bold text-gray-900">Compartilhe seu link</h4>
+                <p className="text-gray-600 text-sm">Envie seu link exclusivo para seus amigos via WhatsApp, Redes Sociais ou E-mail.</p>
+              </div>
+            </div>
+            <div className="flex gap-4">
+              <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center font-bold flex-shrink-0">2</div>
+              <div>
+                <h4 className="font-bold text-gray-900">Amigo se cadastra</h4>
+                <p className="text-gray-600 text-sm">Seu amigo deve se cadastrar usando seu link exclusivo.</p>
+              </div>
+            </div>
+            <div className="flex gap-4">
+              <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center font-bold flex-shrink-0">3</div>
+              <div>
+                <h4 className="font-bold text-gray-900">Primeiro depósito de R$ 10+</h4>
+                <p className="text-gray-600 text-sm">Assim que seu amigo fizer o primeiro depósito de no mínimo R$ 10,00 e ele for aprovado, você ganha o bônus.</p>
+              </div>
+            </div>
+            <div className="flex gap-4">
+              <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center font-bold flex-shrink-0">4</div>
+              <div>
+                <h4 className="font-bold text-gray-900">Bônus na carteira!</h4>
+                <p className="text-gray-600 text-sm">O valor de R$ 2,00 será creditado automaticamente na sua carteira para você usar como quiser.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {referralInfo?.referrals?.length > 0 && (
+          <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+            <h3 className="text-xl font-bold text-primary mb-6">Suas Indicações</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="border-b border-gray-100">
+                    <th className="pb-4 font-bold text-gray-500 uppercase text-xs tracking-wider">Amigo</th>
+                    <th className="pb-4 font-bold text-gray-500 uppercase text-xs tracking-wider">Data</th>
+                    <th className="pb-4 font-bold text-gray-500 uppercase text-xs tracking-wider text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {referralInfo.referrals.map((ref: any) => (
+                    <tr key={ref.id}>
+                      <td className="py-4">
+                        <div className="font-bold text-gray-900">{ref.referred_name}</div>
+                        <div className="text-xs text-gray-500">{ref.referred_nickname}</div>
+                      </td>
+                      <td className="py-4 text-sm text-gray-600">
+                        {new Date(ref.created_at).toLocaleDateString('pt-BR')}
+                      </td>
+                      <td className="py-4 text-center">
+                        {ref.bonus_paid ? (
+                          <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold">Pago</span>
+                        ) : (
+                          <span className="bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-xs font-bold">Pendente</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </motion.div>
+    </div>
+  );
+};
+
 const AdminDashboard = () => {
   const { token } = useAuth();
   const [pendingDeposits, setPendingDeposits] = useState<any[]>([]);
@@ -2222,9 +2390,10 @@ const AdminDashboard = () => {
   const [showWithdrawalForm, setShowWithdrawalForm] = useState(false);
   const [adminNotifications, setAdminNotifications] = useState<any[]>([]);
   const [sentNotifications, setSentNotifications] = useState<any[]>([]);
+  const [referrals, setReferrals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewingProof, setViewingProof] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'withdrawals' | 'users' | 'financial' | 'user-wallets' | 'history' | 'notifications' | 'messages'>('withdrawals');
+  const [activeTab, setActiveTab] = useState<'withdrawals' | 'users' | 'financial' | 'user-wallets' | 'history' | 'notifications' | 'messages' | 'referrals'>('withdrawals');
   const [roundHistory, setRoundHistory] = useState<any[]>([]);
   
   // Notification Form State
@@ -2333,6 +2502,13 @@ const AdminDashboard = () => {
     if (res.ok) setSentNotifications(await res.json());
   };
 
+  const fetchReferrals = async () => {
+    const res = await fetch('/api/admin/referrals', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (res.ok) setReferrals(await res.json());
+  };
+
   useEffect(() => { 
     setLoading(true);
     const promises = [];
@@ -2340,6 +2516,7 @@ const AdminDashboard = () => {
     if (activeTab === 'users' || activeTab === 'messages') promises.push(fetchUsers());
     if (activeTab === 'notifications') promises.push(fetchNotifications());
     if (activeTab === 'messages') promises.push(fetchSentNotifications());
+    if (activeTab === 'referrals') promises.push(fetchReferrals());
     if (activeTab === 'financial') {
       promises.push(fetchFinancials());
       promises.push(fetchFinancialDetails());
@@ -2485,6 +2662,7 @@ const AdminDashboard = () => {
             { id: 'financial', label: 'Financeiro' },
             { id: 'user-wallets', label: 'Carteiras' },
             { id: 'history', label: 'Histórico' },
+            { id: 'referrals', label: 'Indicações' },
             { id: 'notifications', label: 'Alertas' },
             { id: 'messages', label: 'Mensagens' }
           ].map(tab => (
@@ -2636,6 +2814,48 @@ const AdminDashboard = () => {
             </table>
           </div>
         </div>
+      )}
+
+      {activeTab === 'referrals' && (
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm">
+          <h3 className="text-xl font-bold text-primary mb-6">Monitoramento de Indicações</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  <th className="pb-4 font-bold text-gray-500 uppercase text-xs tracking-wider">Indicador</th>
+                  <th className="pb-4 font-bold text-gray-500 uppercase text-xs tracking-wider">Indicado</th>
+                  <th className="pb-4 font-bold text-gray-500 uppercase text-xs tracking-wider">Data</th>
+                  <th className="pb-4 font-bold text-gray-500 uppercase text-xs tracking-wider text-center">Bônus</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {referrals.map((ref: any) => (
+                  <tr key={ref.id}>
+                    <td className="py-4">
+                      <div className="font-bold text-gray-900">{ref.referrer_name}</div>
+                      <div className="text-xs text-gray-500">{ref.referrer_email}</div>
+                    </td>
+                    <td className="py-4">
+                      <div className="font-bold text-gray-900">{ref.referred_name}</div>
+                      <div className="text-xs text-gray-500">{ref.referred_email}</div>
+                    </td>
+                    <td className="py-4 text-sm text-gray-600">
+                      {new Date(ref.created_at).toLocaleDateString('pt-BR')}
+                    </td>
+                    <td className="py-4 text-center">
+                      {ref.bonus_paid ? (
+                        <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold">Pago (R$ {ref.bonus_amount.toFixed(2)})</span>
+                      ) : (
+                        <span className="bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-xs font-bold">Pendente</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </motion.div>
       )}
 
       {activeTab === 'notifications' && (
@@ -4265,6 +4485,7 @@ export default function App() {
       case 'login': return <LoginPage onNavigate={setPage} />;
       case 'dashboard': return <Dashboard onNavigate={setPage} />;
       case 'wallet': return <WalletPage onNavigate={setPage} />;
+      case 'referral': return <ReferralPage />;
       case 'profile': return <ProfilePage onNavigate={setPage} />;
       case 'predictions': return <PredictionsPage onNavigate={setPage} />;
       case 'admin': return isAdmin ? <AdminDashboard /> : <Dashboard onNavigate={setPage} />;

@@ -37,6 +37,10 @@ const sendRealtimeNotification = (userId: string | 'all', notification: any) => 
   }
 };
 
+const generateReferralCode = () => {
+  return Math.random().toString(36).substring(2, 8).toUpperCase();
+};
+
 const addAdminNotification = async (notification: any) => {
   try {
     const { data: setting } = await supabase.from('settings').select('value').eq('key', 'admin_notifications').maybeSingle();
@@ -159,19 +163,79 @@ app.get('/api/health', async (req, res) => {
 
 // Auth
 app.post('/api/auth/register', async (req, res) => {
-  const { email, password, name, nickname, phone } = req.body;
+  const { email, password, name, nickname, phone, referralCode } = req.body;
   try {
+    // Check if phone already exists (antifraude)
+    const { data: existingPhone } = await supabase.from('users').select('id').eq('phone', phone).maybeSingle();
+    if (existingPhone) {
+      return res.status(400).json({ error: 'Este número de telefone já está cadastrado em outra conta.' });
+    }
+
+    let referredById = null;
+    if (referralCode) {
+      const { data: referrer } = await supabase.from('users').select('id').eq('referral_code', referralCode.toUpperCase()).maybeSingle();
+      if (referrer) {
+        referredById = referrer.id;
+      }
+    }
+
+    const myReferralCode = generateReferralCode();
+
     // Storing password in plain text as requested to allow admin to view it
     const { data, error } = await supabase
       .from('users')
-      .insert([{ email, password, name, nickname, phone }])
+      .insert([{ 
+        email, 
+        password, 
+        name, 
+        nickname, 
+        phone, 
+        referral_code: myReferralCode,
+        referred_by: referredById,
+        phone_validated: true
+      }])
       .select()
       .single();
 
     if (error) throw error;
 
-    const token = jwt.sign({ id: data.id, email: data.email, role: data.role, name: data.name, nickname: data.nickname, phone: data.phone }, JWT_SECRET);
-    res.json({ token, user: { id: data.id, email: data.email, name: data.name, role: data.role, nickname: data.nickname, phone: data.phone } });
+    // Create wallet for user
+    await supabase.from('wallets').insert([{ user_id: data.id, balance: 0 }]);
+
+    // If referred, create referral record
+    if (referredById) {
+      await supabase.from('referrals').insert([{
+        referrer_id: referredById,
+        referred_id: data.id,
+        bonus_amount: 2.00,
+        bonus_paid: false
+      }]);
+    }
+
+    const token = jwt.sign({ 
+      id: data.id, 
+      email: data.email, 
+      role: data.role, 
+      name: data.name, 
+      nickname: data.nickname, 
+      phone: data.phone,
+      referral_code: data.referral_code,
+      phone_validated: data.phone_validated
+    }, JWT_SECRET);
+    
+    res.json({ 
+      token, 
+      user: { 
+        id: data.id, 
+        email: data.email, 
+        name: data.name, 
+        role: data.role, 
+        nickname: data.nickname, 
+        phone: data.phone,
+        referral_code: data.referral_code,
+        phone_validated: data.phone_validated
+      } 
+    });
   } catch (err: any) {
     console.error('Register error:', err);
     res.status(400).json({ error: 'Email ou Nickname já existe ou dados inválidos' });
@@ -1015,6 +1079,103 @@ app.post('/api/admin/deposits/:id/approve', authenticate, isAdmin, async (req: a
         reference_id: deposit.id,
         description: 'Depósito via PIX aprovado'
       }]);
+
+      // 2.1 Check for Referral Bonus
+      try {
+        const amount = parseFloat(deposit.amount);
+        if (amount >= 10) {
+          // Check if this is the user's first approved deposit
+          const { count: approvedDeposits } = await supabase
+            .from('deposits')
+            .select('*', { count: 'exact', head: true })
+            .eq('user_id', deposit.user_id)
+            .eq('status', 'approved');
+
+          // If this is the first (or only) approved deposit
+          if (approvedDeposits === 1) {
+            // Check if user was referred
+            const { data: referral } = await supabase
+              .from('referrals')
+              .select('*')
+              .eq('referred_id', deposit.user_id)
+              .eq('bonus_paid', false)
+              .maybeSingle();
+
+            if (referral) {
+              const referrerId = referral.referrer_id;
+              
+              // Get referrer's wallet
+              const { data: referrerWallet } = await supabase
+                .from('wallets')
+                .select('*')
+                .eq('user_id', referrerId)
+                .single();
+
+              if (referrerWallet) {
+                const bonusAmount = parseFloat(referral.bonus_amount || '2.00');
+                const referrerNewBalance = parseFloat(referrerWallet.balance) + bonusAmount;
+
+                // Update referrer's wallet
+                await supabase
+                  .from('wallets')
+                  .update({ balance: referrerNewBalance, updated_at: new Date().toISOString() })
+                  .eq('id', referrerWallet.id);
+
+                // Insert transaction for referrer
+                await supabase.from('wallet_transactions').insert([{
+                  wallet_id: referrerWallet.id,
+                  amount: bonusAmount,
+                  type: 'referral_bonus',
+                  balance_after: referrerNewBalance,
+                  reference_id: referral.id,
+                  description: `Bônus por indicação de amigo (${deposit.user_id})`
+                }]);
+
+                // Mark referral as paid
+                await supabase
+                  .from('referrals')
+                  .update({ bonus_paid: true, updated_at: new Date().toISOString() })
+                  .eq('id', referral.id);
+
+                // Notify referrer
+                const { data: settingRef } = await supabase.from('settings').select('value').eq('key', 'admin_notifications').maybeSingle();
+                let refNotifications = [];
+                if (settingRef?.value) {
+                  try {
+                    refNotifications = JSON.parse(settingRef.value);
+                  } catch (e) {
+                    refNotifications = [];
+                  }
+                }
+
+                const refNotification = {
+                  id: `ref-bon-${Date.now()}`,
+                  title: '🎁 Bônus de Indicação!',
+                  message: `Você recebeu R$ ${bonusAmount.toFixed(2)} de bônus porque seu amigo fez o primeiro depósito!`,
+                  type: 'success',
+                  target_type: 'individual',
+                  user_id: referrerId,
+                  created_at: new Date().toISOString()
+                };
+
+                refNotifications.unshift(refNotification);
+                if (refNotifications.length > 100) refNotifications = refNotifications.slice(0, 100);
+
+                await supabase
+                  .from('settings')
+                  .upsert({ key: 'admin_notifications', value: JSON.stringify(refNotifications) }, { onConflict: 'key' });
+
+                sendRealtimeNotification(referrerId, {
+                  type: 'notification',
+                  data: refNotification
+                });
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error processing referral bonus:', err);
+      }
 
       // 3. Send Notification
       const { data: setting } = await supabase.from('settings').select('value').eq('key', 'admin_notifications').maybeSingle();
@@ -1888,6 +2049,57 @@ app.post('/api/admin/rounds/:id/finish', authenticate, isAdmin, async (req, res)
   } catch (err) {
     console.error('Finish round error:', err);
     res.status(500).json({ error: 'Failed to finish round' });
+  }
+});
+
+// Referral System
+app.get('/api/user/referral-info', authenticate, async (req: any, res) => {
+  try {
+    const userId = req.user.id;
+    const { data: user, error: userErr } = await supabase
+      .from('users')
+      .select('referral_code, referred_by')
+      .eq('id', userId)
+      .single();
+
+    if (userErr) throw userErr;
+
+    const { data: referrals, error: refErr } = await supabase
+      .from('referrals')
+      .select('*, referred:users!referred_id(name, nickname, created_at)')
+      .eq('referrer_id', userId);
+
+    if (refErr) throw refErr;
+
+    const totalReferred = referrals?.length || 0;
+    const paidReferrals = referrals?.filter(r => r.bonus_paid).length || 0;
+    const totalBonusEarned = referrals?.reduce((acc, r) => r.bonus_paid ? acc + parseFloat(r.bonus_amount) : acc, 0) || 0;
+
+    res.json({
+      referral_code: user.referral_code,
+      total_referred: totalReferred,
+      paid_referrals: paidReferrals,
+      total_bonus_earned: totalBonusEarned,
+      referrals: referrals || []
+    });
+  } catch (err: any) {
+    console.error('Referral info error:', err);
+    res.status(500).json({ error: 'Erro ao buscar informações de indicação' });
+  }
+});
+
+app.get('/api/admin/referrals', authenticate, isAdmin, async (req: any, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('referrals')
+      .select('*, referrer:users!referrer_id(name, nickname, email), referred:users!referred_id(name, nickname, email, created_at)')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(data);
+  } catch (err: any) {
+    console.error('Admin referrals error:', err);
+    res.status(500).json({ error: 'Erro ao buscar indicações' });
   }
 });
 

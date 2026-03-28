@@ -6,6 +6,8 @@ interface User {
   name: string;
   nickname: string;
   phone?: string;
+  referral_code?: string;
+  phone_validated?: boolean;
   role: 'user' | 'admin';
 }
 
