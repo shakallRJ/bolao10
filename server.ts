@@ -37,6 +37,51 @@ const sendRealtimeNotification = (userId: string | 'all', notification: any) => 
   }
 };
 
+const addAdminNotification = async (notification: any) => {
+  try {
+    const { data: setting } = await supabase.from('settings').select('value').eq('key', 'admin_notifications').maybeSingle();
+    let notifications = [];
+    if (setting?.value) {
+      try {
+        notifications = JSON.parse(setting.value);
+      } catch (e) {
+        notifications = [];
+      }
+    }
+
+    notifications.unshift({
+      id: Date.now() + Math.random().toString(36).substr(2, 9),
+      created_at: new Date().toISOString(),
+      ...notification
+    });
+
+    // Keep only last 100 notifications
+    if (notifications.length > 100) notifications = notifications.slice(0, 100);
+
+    await supabase.from('settings').upsert({ 
+      key: 'admin_notifications', 
+      value: JSON.stringify(notifications) 
+    }, { onConflict: 'key' });
+
+    // Broadcast to all admins
+    const { data: adminUsers } = await supabase.from('users').select('id').eq('role', 'admin');
+    if (adminUsers) {
+      adminUsers.forEach(admin => {
+        sendRealtimeNotification(admin.id, {
+          type: 'notification',
+          data: {
+            ...notification,
+            id: `admin-notif-${Date.now()}`,
+            created_at: new Date().toISOString()
+          }
+        });
+      });
+    }
+  } catch (err) {
+    console.error('Error adding admin notification:', err);
+  }
+};
+
 wss.on('connection', (ws, req) => {
   let userId: string | null = null;
 
@@ -179,21 +224,14 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     if (error || !user) return res.status(404).json({ error: 'Usuário não encontrado' });
 
     // Notify admin via a notification in settings
-    const { data: currentNotifs } = await supabase.from('settings').select('value').eq('key', 'admin_notifications').maybeSingle();
-    const notifications = currentNotifs ? JSON.parse(currentNotifs.value) : [];
-    
-    notifications.unshift({
-      id: Date.now(),
+    await addAdminNotification({
       type: 'forgot_password',
       user_id: user.id,
       user_name: user.name,
       user_email: user.email,
       user_phone: user.phone,
-      created_at: new Date().toISOString(),
       message: `O usuário ${user.name} (@${user.nickname}) solicitou recuperação de senha.`
     });
-
-    await supabase.from('settings').upsert({ key: 'admin_notifications', value: JSON.stringify(notifications.slice(0, 50)) }, { onConflict: 'key' });
 
     res.json({ success: true });
   } catch (err) {
@@ -818,22 +856,19 @@ app.post('/api/wallet/withdraw', authenticate, async (req: any, res) => {
     if (transErr) throw transErr;
 
     // 5. Notify Admins
-    const { data: adminUsers } = await supabase.from('users').select('id').eq('role', 'admin');
-    if (adminUsers) {
-      adminUsers.forEach(admin => {
-        sendRealtimeNotification(admin.id, {
-          type: 'notification',
-          data: {
-            id: `withdraw-req-${Date.now()}`,
-            type: 'admin_msg',
-            msgType: 'warning',
-            title: '💸 Novo Pedido de Saque',
-            message: `${req.user.name} solicitou um saque de R$ ${withdrawAmount.toFixed(2)}.`,
-            created_at: new Date().toISOString()
-          }
-        });
-      });
-    }
+    await addAdminNotification({
+      type: 'withdrawal_request',
+      user_id: req.user.id,
+      user_name: req.user.name,
+      user_nickname: req.user.nickname,
+      user_email: req.user.email,
+      user_phone: req.user.phone,
+      amount: withdrawAmount,
+      pix_key: pixKey,
+      title: '💸 Novo Pedido de Saque',
+      msgType: 'warning',
+      message: `${req.user.name} solicitou um saque de R$ ${withdrawAmount.toFixed(2)}.`
+    });
 
     res.json({ success: true, newBalance });
   } catch (err: any) {
@@ -851,11 +886,7 @@ app.post('/api/wallet/deposit', authenticate, upload.single('proof'), async (req
       return res.status(400).json({ error: 'Valor de depósito inválido' });
     }
 
-    if (!req.file) {
-      return res.status(400).json({ error: 'Comprovante é obrigatório' });
-    }
-
-    const proofPath = `/uploads/${req.file.filename}`;
+    const proofPath = req.file ? `/uploads/${req.file.filename}` : null;
 
     const { data, error } = await supabase
       .from('deposits')
@@ -869,6 +900,20 @@ app.post('/api/wallet/deposit', authenticate, upload.single('proof'), async (req
       .single();
 
     if (error) throw error;
+
+    // Notify Admins
+    await addAdminNotification({
+      type: 'deposit_request',
+      user_id: req.user.id,
+      user_name: req.user.name,
+      user_nickname: req.user.nickname,
+      user_email: req.user.email,
+      user_phone: req.user.phone,
+      amount: depositAmount,
+      title: '💰 Novo Depósito Pendente',
+      msgType: 'info',
+      message: `${req.user.name} solicitou um depósito de R$ ${depositAmount.toFixed(2)}${req.file ? ' (com comprovante)' : ' (sem comprovante)'}.`
+    });
 
     res.json({ success: true, deposit: data });
   } catch (err: any) {

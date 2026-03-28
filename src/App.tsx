@@ -40,7 +40,10 @@ import {
   ChevronDown,
   ChevronUp,
   PlusCircle,
-  XCircle
+  XCircle,
+  Users,
+  ArrowUpCircle,
+  ArrowDownCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -2209,7 +2212,6 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
 
 const AdminDashboard = () => {
   const { token } = useAuth();
-  const [pending, setPending] = useState<any[]>([]);
   const [pendingDeposits, setPendingDeposits] = useState<any[]>([]);
   const [pendingWithdrawals, setPendingWithdrawals] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
@@ -2220,10 +2222,9 @@ const AdminDashboard = () => {
   const [showWithdrawalForm, setShowWithdrawalForm] = useState(false);
   const [adminNotifications, setAdminNotifications] = useState<any[]>([]);
   const [sentNotifications, setSentNotifications] = useState<any[]>([]);
-  const [viewingPrediction, setViewingPrediction] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [viewingProof, setViewingProof] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'pending' | 'deposits' | 'withdrawals' | 'users' | 'financial' | 'user-wallets' | 'history' | 'notifications' | 'messages'>('pending');
+  const [activeTab, setActiveTab] = useState<'withdrawals' | 'users' | 'financial' | 'user-wallets' | 'history' | 'notifications' | 'messages'>('withdrawals');
   const [roundHistory, setRoundHistory] = useState<any[]>([]);
   
   // Notification Form State
@@ -2238,14 +2239,6 @@ const AdminDashboard = () => {
   
   // Edit User State
   const [editingUser, setEditingUser] = useState<any>(null);
-
-  const fetchPending = async () => {
-    const res = await fetch('/api/admin/pending-predictions', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    const data = await res.json();
-    setPending(data);
-  };
 
   const fetchPendingDeposits = async () => {
     const res = await fetch('/api/admin/deposits', {
@@ -2342,8 +2335,7 @@ const AdminDashboard = () => {
 
   useEffect(() => { 
     setLoading(true);
-    const promises = [fetchPending()];
-    if (activeTab === 'deposits') promises.push(fetchPendingDeposits());
+    const promises = [];
     if (activeTab === 'withdrawals') promises.push(fetchPendingWithdrawals());
     if (activeTab === 'users' || activeTab === 'messages') promises.push(fetchUsers());
     if (activeTab === 'notifications') promises.push(fetchNotifications());
@@ -2352,14 +2344,17 @@ const AdminDashboard = () => {
       promises.push(fetchFinancials());
       promises.push(fetchFinancialDetails());
     }
-    if (activeTab === 'user-wallets') promises.push(fetchUserWallets());
+    if (activeTab === 'user-wallets') {
+      promises.push(fetchUserWallets());
+      promises.push(fetchPendingDeposits());
+    }
     if (activeTab === 'history') promises.push(fetchRoundHistory());
     Promise.all(promises).finally(() => setLoading(false));
 
     const handleNewNotification = (e: any) => {
       const notif = e.detail;
       if (notif && notif.id) {
-        if (notif.id.startsWith('dep-req-') && activeTab === 'deposits') fetchPendingDeposits();
+        if (notif.id.startsWith('dep-req-') && activeTab === 'user-wallets') fetchPendingDeposits();
         if (notif.id.startsWith('withdraw-req-') && activeTab === 'withdrawals') fetchPendingWithdrawals();
       }
     };
@@ -2369,18 +2364,6 @@ const AdminDashboard = () => {
       window.removeEventListener('new_notification', handleNewNotification);
     };
   }, [token, activeTab]);
-
-  const handleValidate = async (id: number, status: 'approved' | 'rejected') => {
-    const res = await fetch(`/api/admin/predictions/${id}/validate`, {
-      method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ status })
-    });
-    if (res.ok) fetchPending();
-  };
 
   const handleValidateDeposit = async (id: number, status: 'approved' | 'rejected') => {
     const res = await fetch(`/api/admin/deposits/${id}/approve`, {
@@ -2497,8 +2480,6 @@ const AdminDashboard = () => {
         <h2 className="text-3xl font-bold text-primary">Painel Administrativo</h2>
         <div className="flex bg-gray-100 p-1 rounded-xl overflow-x-auto max-w-full">
           {[
-            { id: 'pending', label: 'Validações' },
-            { id: 'deposits', label: 'Depósitos' },
             { id: 'withdrawals', label: 'Saques' },
             { id: 'users', label: 'Usuários' },
             { id: 'financial', label: 'Financeiro' },
@@ -2518,138 +2499,6 @@ const AdminDashboard = () => {
         </div>
       </div>
       
-      {activeTab === 'pending' && (
-        <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-gray-100 bg-gray-50">
-            <h3 className="font-bold text-primary">Validação Manual de Palpites</h3>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">
-                  <th className="px-6 py-4">Usuário</th>
-                  <th className="px-6 py-4">Rodada</th>
-                  <th className="px-6 py-4">Data Envio</th>
-                  <th className="px-6 py-4">Palpites</th>
-                  <th className="px-6 py-4">Comprovante</th>
-                  <th className="px-6 py-4">Ações</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {pending.map((p) => (
-                  <tr key={p.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4">
-                      <p className="font-bold text-primary">{p.user_name} ({p.user_nickname})</p>
-                      <p className="text-xs text-gray-500">{p.user_email}</p>
-                      {p.user_phone && <p className="text-xs text-gray-500">{p.user_phone}</p>}
-                    </td>
-                    <td className="px-6 py-4 font-medium">#{p.round_number}</td>
-                    <td className="px-6 py-4 text-sm text-gray-500">{formatDate(p.created_at, 'dd/MM HH:mm')}</td>
-                    <td className="px-6 py-4">
-                      <button 
-                        onClick={() => setViewingPrediction(p)}
-                        className="text-primary hover:underline text-sm font-bold"
-                      >
-                        Ver Palpites
-                      </button>
-                    </td>
-                    <td className="px-6 py-4">
-                      <button 
-                        onClick={() => setViewingProof(p.proof_path)}
-                        className="text-secondary hover:underline text-sm font-bold"
-                      >
-                        Ver Arquivo
-                      </button>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex space-x-2">
-                        <button 
-                          onClick={() => handleValidate(p.id, 'approved')}
-                          className="bg-green-100 text-green-600 px-3 py-1 rounded-lg text-xs font-bold hover:bg-green-200"
-                        >
-                          Aprovar
-                        </button>
-                        <button 
-                          onClick={() => handleValidate(p.id, 'rejected')}
-                          className="bg-red-100 text-red-600 px-3 py-1 rounded-lg text-xs font-bold hover:bg-red-200"
-                        >
-                          Rejeitar
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'deposits' && (
-        <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-gray-100 bg-gray-50">
-            <h3 className="font-bold text-primary">Validação de Depósitos</h3>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">
-                  <th className="px-6 py-4">Usuário</th>
-                  <th className="px-6 py-4">Data Envio</th>
-                  <th className="px-6 py-4">Valor</th>
-                  <th className="px-6 py-4">Comprovante</th>
-                  <th className="px-6 py-4">Ações</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {pendingDeposits.map((d) => (
-                  <tr key={d.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4">
-                      <p className="font-bold text-primary">{d.user_name} ({d.user_nickname})</p>
-                      <p className="text-xs text-gray-500">{d.user_email}</p>
-                      {d.user_phone && <p className="text-xs text-gray-500">{d.user_phone}</p>}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-500">{formatDate(d.created_at, 'dd/MM HH:mm')}</td>
-                    <td className="px-6 py-4 font-bold text-green-600">R$ {d.amount.toFixed(2)}</td>
-                    <td className="px-6 py-4">
-                      <button 
-                        onClick={() => setViewingProof(d.proof_url)}
-                        className="text-secondary hover:underline text-sm font-bold"
-                      >
-                        Ver Arquivo
-                      </button>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex space-x-2">
-                        <button 
-                          onClick={() => handleValidateDeposit(d.id, 'approved')}
-                          className="bg-green-100 text-green-600 px-3 py-1 rounded-lg text-xs font-bold hover:bg-green-200"
-                        >
-                          Aprovar
-                        </button>
-                        <button 
-                          onClick={() => handleValidateDeposit(d.id, 'rejected')}
-                          className="bg-red-100 text-red-600 px-3 py-1 rounded-lg text-xs font-bold hover:bg-red-200"
-                        >
-                          Rejeitar
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {pendingDeposits.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
-                      Nenhum depósito pendente de validação.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
       {activeTab === 'withdrawals' && (
         <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
           <div className="p-6 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
@@ -2805,34 +2654,94 @@ const AdminDashboard = () => {
                 <div key={n.id} className="p-6 hover:bg-gray-50 transition-colors">
                   <div className="flex items-start justify-between">
                     <div className="flex items-start space-x-4">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${n.type === 'forgot_password' ? 'bg-orange-100 text-orange-600' : 'bg-blue-100 text-blue-600'}`}>
-                        {n.type === 'forgot_password' ? <AlertCircle className="w-5 h-5" /> : <Bell className="w-5 h-5" />}
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+                        n.type === 'forgot_password' ? 'bg-orange-100 text-orange-600' : 
+                        n.type === 'withdrawal_request' ? 'bg-red-100 text-red-600' :
+                        n.type === 'deposit_request' ? 'bg-green-100 text-green-600' :
+                        'bg-blue-100 text-blue-600'
+                      }`}>
+                        {n.type === 'forgot_password' ? <AlertCircle className="w-5 h-5" /> : 
+                         n.type === 'withdrawal_request' ? <ArrowUpCircle className="w-5 h-5" /> :
+                         n.type === 'deposit_request' ? <ArrowDownCircle className="w-5 h-5" /> :
+                         <Bell className="w-5 h-5" />}
                       </div>
                       <div>
-                        <p className="font-bold text-gray-900">{n.message}</p>
-                        <p className="text-sm text-gray-500 mt-1">
-                          Solicitado em {formatDate(n.created_at || n.date, 'dd/MM/yyyy HH:mm')}
+                        <p className="font-bold text-gray-900">{n.title || n.message}</p>
+                        {n.title && <p className="text-sm text-gray-600 mt-0.5">{n.message}</p>}
+                        <p className="text-xs text-gray-400 mt-1">
+                          {formatDate(n.created_at || n.date, 'dd/MM/yyyy HH:mm')}
                         </p>
+                        
                         <div className="mt-4 flex flex-wrap gap-2">
-                          <a 
-                            href={`mailto:${n.user_email}?subject=Recuperação de Senha - Bolão10&body=Olá ${n.user_name}, recebemos sua solicitação de recuperação de senha.`}
-                            className="bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors flex items-center"
-                          >
-                            <Mail className="w-3.5 h-3.5 mr-1.5" /> Enviar E-mail
-                          </a>
-                          {n.user_phone && (
+                          {n.type === 'forgot_password' && (
+                            <>
+                              <a 
+                                href={`mailto:${n.user_email}?subject=Recuperação de Senha - Bolão10&body=Olá ${n.user_name}, recebemos sua solicitação de recuperação de senha.`}
+                                className="bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-100 transition-colors flex items-center"
+                              >
+                                <Mail className="w-3.5 h-3.5 mr-1.5" /> Enviar E-mail
+                              </a>
+                              {n.user_phone && (
+                                <a 
+                                  href={`https://wa.me/55${n.user_phone.replace(/\D/g, '')}?text=Olá ${n.user_name}, recebemos sua solicitação de recuperação de senha no Bolão10.`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="bg-green-50 text-green-600 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-green-100 transition-colors flex items-center"
+                                >
+                                  <MessageCircle className="w-3.5 h-3.5 mr-1.5" /> Enviar WhatsApp
+                                </a>
+                              )}
+                            </>
+                          )}
+
+                          {n.type === 'withdrawal_request' && (
+                            <button 
+                              onClick={() => setActiveTab('withdrawals')}
+                              className="bg-red-50 text-red-600 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-red-100 transition-colors flex items-center"
+                            >
+                              <ArrowUpCircle className="w-3.5 h-3.5 mr-1.5" /> Ver Pedidos de Saque
+                            </button>
+                          )}
+
+                          {n.type === 'deposit_request' && (
+                            <button 
+                              onClick={() => setActiveTab('user-wallets')}
+                              className="bg-green-50 text-green-600 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-green-100 transition-colors flex items-center"
+                            >
+                              <ArrowDownCircle className="w-3.5 h-3.5 mr-1.5" /> Validar Depósitos
+                            </button>
+                          )}
+
+                          {(n.type === 'withdrawal_request' || n.type === 'deposit_request') && n.user_phone && (
                             <a 
-                              href={`https://wa.me/55${n.user_phone.replace(/\D/g, '')}?text=Olá ${n.user_name}, recebemos sua solicitação de recuperação de senha no Bolão10.`}
+                              href={`https://wa.me/55${n.user_phone.replace(/\D/g, '')}?text=Olá ${n.user_name}, sobre seu pedido de ${n.type === 'withdrawal_request' ? 'saque' : 'depósito'} no Bolão10...`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="bg-green-50 text-green-600 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-green-100 transition-colors flex items-center"
                             >
-                              <MessageCircle className="w-3.5 h-3.5 mr-1.5" /> Enviar WhatsApp
+                              <MessageCircle className="w-3.5 h-3.5 mr-1.5" /> Contatar Usuário
                             </a>
                           )}
                         </div>
                       </div>
                     </div>
+                    <button 
+                      onClick={async () => {
+                        try {
+                          const res = await fetch(`/api/admin/notifications/${n.id}`, {
+                            method: 'DELETE',
+                            headers: { 'Authorization': `Bearer ${token}` }
+                          });
+                          if (res.ok) fetchNotifications();
+                        } catch (err) {
+                          console.error('Error deleting notification:', err);
+                        }
+                      }}
+                      className="text-gray-300 hover:text-red-500 transition-colors p-1"
+                      title="Remover alerta"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
               ))
@@ -2979,79 +2888,217 @@ const AdminDashboard = () => {
         </div>
       )}
 
-      {activeTab === 'user-wallets' && (
-        <div className="space-y-6">
-          <div className="bg-white rounded-3xl shadow-sm overflow-hidden border border-gray-100">
-            <div className="p-6 border-b border-gray-100 flex justify-between items-center">
-              <h3 className="text-xl font-bold text-primary flex items-center gap-2">
-                <Wallet className="w-6 h-6 text-blue-500" />
-                Carteiras dos Usuários
-              </h3>
-              <button onClick={fetchUserWallets} className="text-sm text-blue-500 hover:underline">
-                Atualizar
-              </button>
+      {activeTab === 'user-wallets' && (() => {
+        const totalBalance = userWallets.reduce((acc, uw) => acc + (uw.balance || 0), 0);
+        const totalDeposited = userWallets.reduce((acc, uw) => acc + (uw.totalDeposited || 0), 0);
+        const totalWinnings = userWallets.reduce((acc, uw) => acc + (uw.totalWinnings || 0), 0);
+        const totalWithdrawn = userWallets.reduce((acc, uw) => acc + (uw.totalWithdrawn || 0), 0);
+        const activeUsersCount = userWallets.filter(uw => uw.balance > 0).length;
+
+        return (
+          <div className="space-y-8">
+            {/* Summary Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
+              <div className="bg-white p-6 rounded-3xl border-l-4 border-green-500 shadow-sm flex justify-between items-center">
+                <div>
+                  <p className="text-xs font-bold text-gray-400 uppercase mb-1">Saldo Total em Carteiras</p>
+                  <p className="text-2xl font-bold text-primary">R$ {totalBalance.toFixed(2)}</p>
+                </div>
+                <div className="w-12 h-12 bg-green-50 text-green-500 rounded-full flex items-center justify-center">
+                  <Wallet className="w-6 h-6" />
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-3xl border-l-4 border-blue-500 shadow-sm flex justify-between items-center">
+                <div>
+                  <p className="text-xs font-bold text-gray-400 uppercase mb-1">Total Depositado</p>
+                  <p className="text-2xl font-bold text-primary">R$ {totalDeposited.toFixed(2)}</p>
+                </div>
+                <div className="w-12 h-12 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center">
+                  <TrendingUp className="w-6 h-6" />
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-3xl border-l-4 border-purple-500 shadow-sm flex justify-between items-center">
+                <div>
+                  <p className="text-xs font-bold text-gray-400 uppercase mb-1">Total de Prêmios</p>
+                  <p className="text-2xl font-bold text-primary">R$ {totalWinnings.toFixed(2)}</p>
+                </div>
+                <div className="w-12 h-12 bg-purple-50 text-purple-500 rounded-full flex items-center justify-center">
+                  <Gift className="w-6 h-6" />
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-3xl border-l-4 border-red-500 shadow-sm flex justify-between items-center">
+                <div>
+                  <p className="text-xs font-bold text-gray-400 uppercase mb-1">Total Sacado</p>
+                  <p className="text-2xl font-bold text-red-600">R$ {totalWithdrawn.toFixed(2)}</p>
+                </div>
+                <div className="w-12 h-12 bg-red-50 text-red-500 rounded-full flex items-center justify-center">
+                  <TrendingDown className="w-6 h-6" />
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-3xl border-l-4 border-orange-500 shadow-sm flex justify-between items-center">
+                <div>
+                  <p className="text-xs font-bold text-gray-400 uppercase mb-1">Usuários com Saldo</p>
+                  <p className="text-2xl font-bold text-orange-600">{activeUsersCount}</p>
+                </div>
+                <div className="w-12 h-12 bg-orange-50 text-orange-500 rounded-full flex items-center justify-center">
+                  <Users className="w-6 h-6" />
+                </div>
+              </div>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
-                    <th className="px-6 py-4 font-semibold">Usuário</th>
-                    <th className="px-6 py-4 font-semibold">Saldo Atual</th>
-                    <th className="px-6 py-4 font-semibold">Total Depositado</th>
-                    <th className="px-6 py-4 font-semibold">Total Ganho</th>
-                    <th className="px-6 py-4 font-semibold">Saques</th>
-                    <th className="px-6 py-4 font-semibold">Histórico de Depósitos</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {userWallets.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="px-6 py-8 text-center text-gray-400">Nenhuma carteira encontrada.</td>
+
+            <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+              <div className="p-6 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                <h3 className="font-bold text-primary flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-yellow-500" />
+                  Validação de Depósitos
+                </h3>
+                <span className="bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-xs font-bold">
+                  {pendingDeposits.length} Pendentes
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">
+                      <th className="px-6 py-4">Usuário</th>
+                      <th className="px-6 py-4">Data</th>
+                      <th className="px-6 py-4">Valor</th>
+                      <th className="px-6 py-4">Comprovante</th>
+                      <th className="px-6 py-4">Ações</th>
                     </tr>
-                  ) : (
-                    userWallets.map((uw: any) => (
-                      <tr key={uw.user.id} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-6 py-4">
-                          <p className="font-bold text-primary">{uw.user.name}</p>
-                          <p className="text-xs text-gray-500">{uw.user.email}</p>
-                          {uw.user.nickname && <p className="text-xs text-blue-500">@{uw.user.nickname}</p>}
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className="font-bold text-green-600">R$ {uw.balance.toFixed(2)}</span>
-                        </td>
-                        <td className="px-6 py-4 text-gray-600">R$ {uw.totalDeposited.toFixed(2)}</td>
-                        <td className="px-6 py-4 text-blue-600">R$ {uw.totalWinnings.toFixed(2)}</td>
-                        <td className="px-6 py-4 text-red-500">R$ {uw.totalWithdrawn.toFixed(2)}</td>
-                        <td className="px-6 py-4">
-                          {uw.deposits.length === 0 ? (
-                            <span className="text-xs text-gray-400">Sem depósitos</span>
-                          ) : (
-                            <div className="space-y-1 max-h-32 overflow-y-auto pr-2">
-                              {uw.deposits.map((d: any) => (
-                                <div key={d.id} className="text-xs flex justify-between items-center bg-gray-100 p-2 rounded">
-                                  <span>{formatDate(d.created_at, 'dd/MM/yy')}</span>
-                                  <span className="font-bold">R$ {d.amount.toFixed(2)}</span>
-                                  <span className={`px-2 py-0.5 rounded-full text-[10px] ${
-                                    d.status === 'approved' ? 'bg-green-100 text-green-700' :
-                                    d.status === 'rejected' ? 'bg-red-100 text-red-700' :
-                                    'bg-yellow-100 text-yellow-700'
-                                  }`}>
-                                    {d.status === 'approved' ? 'Aprovado' : d.status === 'rejected' ? 'Rejeitado' : 'Pendente'}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </td>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {pendingDeposits.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="px-6 py-8 text-center text-gray-400 italic">Nenhum depósito pendente de validação.</td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                    ) : (
+                      pendingDeposits.map((d) => (
+                        <tr key={d.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-6 py-4">
+                            <p className="font-bold text-primary">{d.user_name} ({d.user_nickname})</p>
+                            <p className="text-xs text-gray-500">{d.user_email}</p>
+                          </td>
+                          <td className="px-6 py-4 text-gray-600 text-sm">
+                            {new Date(d.created_at).toLocaleString('pt-BR')}
+                          </td>
+                          <td className="px-6 py-4 font-bold text-green-600">
+                            R$ {d.amount.toFixed(2)}
+                          </td>
+                          <td className="px-6 py-4">
+                            {d.proof_url ? (
+                              <button 
+                                onClick={() => setViewingProof(d.proof_url)}
+                                className="text-blue-500 hover:text-blue-700 flex items-center gap-1 text-sm font-bold"
+                              >
+                                <Eye className="w-4 h-4" /> Ver Comprovante
+                              </button>
+                            ) : (
+                              <span className="text-gray-400 text-xs italic">Sem comprovante</span>
+                            )}
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-2">
+                              <button 
+                                onClick={() => handleValidateDeposit(d.id, 'approved')}
+                                className="p-2 bg-green-50 text-green-600 rounded-xl hover:bg-green-100 transition-colors"
+                                title="Aprovar"
+                              >
+                                <CheckCircle className="w-5 h-5" />
+                              </button>
+                              <button 
+                                onClick={() => handleValidateDeposit(d.id, 'rejected')}
+                                className="p-2 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-colors"
+                                title="Rejeitar"
+                              >
+                                <XCircle className="w-5 h-5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-3xl shadow-sm overflow-hidden border border-gray-100">
+              <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+                <h3 className="text-xl font-bold text-primary flex items-center gap-2">
+                  <Wallet className="w-6 h-6 text-blue-500" />
+                  Carteiras dos Usuários (Saldo Ativo)
+                </h3>
+                <button onClick={fetchUserWallets} className="text-sm text-blue-500 hover:underline">
+                  Atualizar
+                </button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
+                      <th className="px-6 py-4 font-semibold">Usuário</th>
+                      <th className="px-6 py-4 font-semibold">Saldo Atual</th>
+                      <th className="px-6 py-4 font-semibold">Total Depositado</th>
+                      <th className="px-6 py-4 font-semibold">Total Ganho</th>
+                      <th className="px-6 py-4 font-semibold">Saques</th>
+                      <th className="px-6 py-4 font-semibold">Histórico de Depósitos</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {userWallets.filter((uw: any) => uw.balance > 0).length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-6 py-8 text-center text-gray-400">Nenhuma carteira com saldo ativo encontrada.</td>
+                      </tr>
+                    ) : (
+                      userWallets.filter((uw: any) => uw.balance > 0).map((uw: any) => (
+                        <tr key={uw.user.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-6 py-4">
+                            <p className="font-bold text-primary">{uw.user.name}</p>
+                            <p className="text-xs text-gray-500">{uw.user.email}</p>
+                            {uw.user.nickname && <p className="text-xs text-blue-500">@{uw.user.nickname}</p>}
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className="font-bold text-green-600">R$ {uw.balance.toFixed(2)}</span>
+                          </td>
+                          <td className="px-6 py-4 text-gray-600">R$ {uw.totalDeposited.toFixed(2)}</td>
+                          <td className="px-6 py-4 text-blue-600">R$ {uw.totalWinnings.toFixed(2)}</td>
+                          <td className="px-6 py-4 text-red-500">R$ {uw.totalWithdrawn.toFixed(2)}</td>
+                          <td className="px-6 py-4">
+                            {uw.deposits.length === 0 ? (
+                              <span className="text-xs text-gray-400">Sem depósitos</span>
+                            ) : (
+                              <div className="space-y-1 max-h-32 overflow-y-auto pr-2">
+                                {uw.deposits.map((d: any) => (
+                                  <div key={d.id} className="text-xs flex justify-between items-center bg-gray-100 p-2 rounded">
+                                    <span>{formatDate(d.created_at, 'dd/MM/yy')}</span>
+                                    <span className="font-bold">R$ {d.amount.toFixed(2)}</span>
+                                    <span className={`px-2 py-0.5 rounded-full text-[10px] ${
+                                      d.status === 'approved' ? 'bg-green-100 text-green-700' :
+                                      d.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                                      'bg-yellow-100 text-yellow-700'
+                                    }`}>
+                                      {d.status === 'approved' ? 'Aprovado' : d.status === 'rejected' ? 'Rejeitado' : 'Pendente'}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {activeTab === 'financial' && (() => {
         const totalAdminFee = financials.reduce((acc, f) => acc + (f.admin_fee_collected || 0), 0);
@@ -3385,62 +3432,6 @@ const AdminDashboard = () => {
       )}
 
       <AnimatePresence>
-        {viewingPrediction && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4"
-          >
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="bg-white rounded-[40px] max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl"
-            >
-              <div className="p-8 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-                <div>
-                  <h3 className="text-2xl font-bold text-primary">Palpites de {viewingPrediction.user_nickname}</h3>
-                  <p className="text-gray-500">Rodada #{viewingPrediction.round_number}</p>
-                </div>
-                <button onClick={() => setViewingPrediction(null)} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto p-8">
-                <div className="space-y-3">
-                  {viewingPrediction.games?.map((game: any) => {
-                    const item = viewingPrediction.items?.find((i: any) => i.game_id === game.id);
-                    return (
-                      <div key={game.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-100">
-                        <div className="flex-1">
-                          <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Jogo {game.game_order}</p>
-                          <p className="font-bold text-primary">{game.team_home} vs {game.team_away}</p>
-                        </div>
-                        <div className="flex items-center space-x-4">
-                          <div className="text-center">
-                            <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Palpite</p>
-                            <span className="bg-primary text-white px-4 py-1 rounded-full font-bold text-sm">
-                              {item?.guess === '1' ? 'Casa' : item?.guess === 'X' ? 'Empate' : 'Fora'}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-              <div className="p-8 border-t border-gray-100 bg-gray-50 flex justify-end">
-                <button 
-                  onClick={() => setViewingPrediction(null)}
-                  className="px-8 py-3 bg-primary text-white rounded-2xl font-bold hover:shadow-lg transition-all"
-                >
-                  Fechar
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-
         {viewingProof && (
           <div className="fixed inset-0 bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
             <motion.div 
@@ -4180,7 +4171,8 @@ const TermsPage = () => {
             <ul className="list-disc pl-5 space-y-2">
               <li><strong>A Rodada:</strong> O BOLÃO10 baseia-se em 10 partidas de futebol selecionadas do Campeonato Brasileiro.</li>
               <li><strong>O Palpite:</strong> Para cada partida, o usuário deve prognosticar um dos três resultados possíveis: Vitória do Time 1, Empate ou Vitória do Time 2.</li>
-              <li><strong>Validade:</strong> A participação só será considerada ativa após a realização do pagamento via PIX (chave: admin@bolao10.com), o envio do comprovante pelo sistema e a validação manual pelo administrador.</li>
+              <li><strong>Carteira Virtual:</strong> O sistema utiliza uma carteira virtual. Você deve depositar saldo em sua conta para poder realizar palpites.</li>
+              <li><strong>Custo do Palpite:</strong> Cada palpite realizado debita automaticamente o valor da inscrição do seu saldo disponível na carteira.</li>
               <li><strong>Prazo:</strong> As apostas devem ser enviadas até o limite estipulado pelo sistema (geralmente 1 hora antes do início da primeira partida da rodada).</li>
             </ul>
           </section>
@@ -4207,10 +4199,12 @@ const TermsPage = () => {
           </section>
 
           <section>
-            <h2 className="text-2xl font-bold text-primary mb-4">3. Validação e Transparência</h2>
+            <h2 className="text-2xl font-bold text-primary mb-4">3. Carteira, Depósitos e Saques</h2>
             <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Confirmação:</strong> A responsabilidade pelo envio do comprovante é do participante. Sem o envio e a validação do administrador, o palpite não entra no cálculo da rodada.</li>
-              <li><strong>Transparência:</strong> Após o início da rodada, a lista de palpites de todos os usuários validados será publicada na área "Ranking de Transparência", permitindo que todos confiram os resultados dos demais participantes.</li>
+              <li><strong>Depósitos:</strong> Os depósitos são feitos via PIX. Após realizar a transferência, você pode informar o valor no sistema e anexar o comprovante para validação manual pelo administrador. O saldo será creditado em sua carteira assim que confirmado.</li>
+              <li><strong>Premiação:</strong> Os prêmios conquistados são creditados diretamente em sua carteira virtual após a finalização e conferência da rodada.</li>
+              <li><strong>Saques:</strong> Você pode solicitar o saque do seu saldo disponível a qualquer momento. O administrador processará o pagamento via PIX para a chave informada no pedido de saque.</li>
+              <li><strong>Transparência:</strong> Após o início da rodada, a lista de palpites de todos os usuários que confirmaram participação será publicada na área "Ranking de Transparência", permitindo que todos confiram os resultados.</li>
             </ul>
           </section>
 

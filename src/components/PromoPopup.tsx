@@ -60,15 +60,15 @@ export const PromoPopup: React.FC<PromoPopupProps> = ({ onNavigate }) => {
             </div>
 
             <h2 className="text-xl sm:text-2xl font-black text-white mb-6 drop-shadow-lg leading-tight">
-              ✨ BOLÃO 10 - EDIÇÃO ESPECIAL: O DESAFIO MUNDIAL ✨
+              🚀 NOVIDADE: CARTEIRA VIRTUAL BOLÃO10! 🚀
             </h2>
             
             <div className="space-y-4 text-gray-300 font-medium text-base sm:text-lg leading-relaxed">
               <p>
-                Este fim de semana é gigante! Preparamos uma <strong className="text-amber-400">4ª Rodada única</strong> com 10 Amistosos Internacionais de prestígio.
+                Agora ficou muito mais fácil jogar! Adicione saldo à sua <strong className="text-amber-400">Carteira Virtual</strong> via PIX e faça seus palpites instantaneamente.
               </p>
               <p className="p-4 bg-white/5 rounded-2xl border border-white/10 shadow-inner">
-                É sua chance de provar que conhece tudo de futebol mundial! É fácil de jogar e os prêmios são incríveis. Quantas chances de ganhar você vai garantir hoje? 🎟️
+                Seus prêmios também caem direto na carteira e você pode solicitar o saque a qualquer momento. Praticidade e rapidez para você focar no que importa: os acertos! 💰
               </p>
             </div>
           </div>
@@ -78,11 +78,11 @@ export const PromoPopup: React.FC<PromoPopupProps> = ({ onNavigate }) => {
             <button
               onClick={() => {
                 setIsOpen(false);
-                onNavigate('predictions');
+                onNavigate('wallet');
               }}
               className="w-full py-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-2xl font-bold text-lg shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:shadow-[0_0_25px_rgba(245,158,11,0.5)] transition-all transform hover:-translate-y-1"
             >
-              👉 JOGUE AGORA E CONCORRA!
+              👉 ACESSAR MINHA CARTEIRA
             </button>
           </div>
         </motion.div>

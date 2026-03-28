@@ -39,17 +39,14 @@ export const DepositModal = ({ isOpen, onClose, token, onDepositSuccess }: any) 
   };
 
   const handleSubmit = async () => {
-    if (!proofFile) {
-      setError('Anexe o comprovante de pagamento.');
-      return;
-    }
-
     setLoading(true);
     setError(null);
 
     const formData = new FormData();
     formData.append('amount', amount);
-    formData.append('proof', proofFile);
+    if (proofFile) {
+      formData.append('proof', proofFile);
+    }
 
     try {
       const res = await fetch('/api/wallet/deposit', {
@@ -147,7 +144,7 @@ export const DepositModal = ({ isOpen, onClose, token, onDepositSuccess }: any) 
               </div>
 
               <div className="border-t border-gray-100 pt-6">
-                <label className="block text-sm font-bold text-gray-700 mb-2">Comprovante de Pagamento</label>
+                <label className="block text-sm font-bold text-gray-700 mb-2">Comprovante de Pagamento (Opcional)</label>
                 <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-xl hover:bg-gray-50 transition-colors">
                   <div className="space-y-1 text-center">
                     <Upload className="mx-auto h-12 w-12 text-gray-400" />
@@ -165,6 +162,9 @@ export const DepositModal = ({ isOpen, onClose, token, onDepositSuccess }: any) 
                     <Check className="w-4 h-4 mr-1" /> Arquivo selecionado: {proofFile.name}
                   </p>
                 )}
+                {!proofFile && (
+                  <p className="mt-2 text-xs text-gray-400 italic">Você pode confirmar o depósito agora e o administrador validará manualmente.</p>
+                )}
               </div>
 
               <div className="flex gap-3">
@@ -176,7 +176,7 @@ export const DepositModal = ({ isOpen, onClose, token, onDepositSuccess }: any) 
                 </button>
                 <button
                   onClick={handleSubmit}
-                  disabled={loading || !proofFile}
+                  disabled={loading}
                   className="flex-1 bg-primary text-white font-bold py-4 rounded-xl hover:bg-primary/90 transition-colors disabled:opacity-50"
                 >
                   {loading ? 'Enviando...' : 'Confirmar'}
