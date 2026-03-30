@@ -1641,7 +1641,7 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
                 <div className="bg-gradient-to-br from-amber-500 to-amber-600 rounded-3xl p-6 text-white shadow-md flex items-center justify-between">
                   <div>
                     <p className="text-amber-100 font-medium mb-1">Bônus 10 Acertos</p>
-                    <p className="text-2xl font-bold">R$ {currentRound?.jackpotPool?.toFixed(2) || '0.00'}</p>
+                    <p className="text-2xl font-bold">R$ {walletData?.jackpotPool?.toFixed(2) || '0.00'}</p>
                   </div>
                   <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
                     <Trophy className="w-6 h-6 text-white" />
@@ -4474,6 +4474,17 @@ const TermsPage = () => {
 export default function App() {
   const [page, setPage] = useState('landing');
   const { isAuthenticated, isAdmin } = useAuth();
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get('ref');
+    if (ref) {
+      sessionStorage.setItem('referredBy', ref);
+      // Clean up URL
+      const newUrl = window.location.pathname + window.location.hash;
+      window.history.replaceState({}, document.title, newUrl);
+    }
+  }, []);
 
   useEffect(() => {
     if (isAuthenticated && page === 'landing') setPage('dashboard');

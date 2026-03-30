@@ -596,7 +596,10 @@ app.get('/api/my-wallet', authenticate, async (req: any, res) => {
       }
     });
 
-    res.json({ totalSpent, predictionsMade, totalWinnings, pendingPredictions, pendingDeposits, pendingWithdrawals });
+    const { data: jackpotSetting } = await supabase.from('settings').select('value').eq('key', 'jackpot_pool').maybeSingle();
+    const jackpotPool = parseFloat(jackpotSetting?.value || '0');
+
+    res.json({ totalSpent, predictionsMade, totalWinnings, pendingPredictions, pendingDeposits, pendingWithdrawals, jackpotPool });
   } catch (err) {
     console.error('Wallet error:', err);
     res.status(500).json({ error: 'Falha ao buscar resumo financeiro' });
@@ -1091,8 +1094,8 @@ app.post('/api/admin/deposits/:id/approve', authenticate, isAdmin, async (req: a
             .eq('user_id', deposit.user_id)
             .eq('status', 'approved');
 
-          // If this is the first (or only) approved deposit
-          if (approvedDeposits === 1) {
+          // If this is the first approved deposit (count will be 0 before this one is updated)
+          if (approvedDeposits === 0) {
             // Check if user was referred
             const { data: referral } = await supabase
               .from('referrals')
