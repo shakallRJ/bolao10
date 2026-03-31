@@ -507,6 +507,7 @@ const LoginPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [referralCodeInput, setReferralCodeInput] = useState(localStorage.getItem('referredBy') || '');
   const { login } = useAuth();
 
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -527,7 +528,7 @@ const LoginPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
     setError('');
     setSuccess('');
     const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
-    const referralCode = isRegister ? sessionStorage.getItem('referredBy') : null;
+    const referralCode = isRegister ? referralCodeInput : null;
     const body = isRegister 
       ? { email, password, name, nickname, phone, referralCode } 
       : { email, password };
@@ -540,6 +541,9 @@ const LoginPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
       });
       const data = await res.json();
       if (res.ok) {
+        if (isRegister) {
+          localStorage.removeItem('referredBy');
+        }
         login(data.token, data.user);
         onNavigate('dashboard');
       } else {
@@ -634,6 +638,16 @@ const LoginPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
                   onChange={handlePhoneChange}
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-secondary focus:border-transparent outline-none transition-all"
                   placeholder="(00) 00000-0000"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Código de Indicação (Opcional)</label>
+                <input 
+                  type="text" 
+                  value={referralCodeInput}
+                  onChange={(e) => setReferralCodeInput(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-secondary focus:border-transparent outline-none transition-all uppercase"
+                  placeholder="Ex: 50969B51"
                 />
               </div>
             </>
@@ -4479,7 +4493,7 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const ref = params.get('ref');
     if (ref) {
-      sessionStorage.setItem('referredBy', ref);
+      localStorage.setItem('referredBy', ref);
       // Clean up URL
       const newUrl = window.location.pathname + window.location.hash;
       window.history.replaceState({}, document.title, newUrl);

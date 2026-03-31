@@ -173,7 +173,7 @@ app.post('/api/auth/register', async (req, res) => {
 
     let referredById = null;
     if (referralCode) {
-      const { data: referrer } = await supabase.from('users').select('id').eq('referral_code', referralCode.toUpperCase()).maybeSingle();
+      const { data: referrer } = await supabase.from('users').select('id').eq('referral_code', referralCode.trim().toUpperCase()).maybeSingle();
       if (referrer) {
         referredById = referrer.id;
       }
@@ -1087,92 +1087,82 @@ app.post('/api/admin/deposits/:id/approve', authenticate, isAdmin, async (req: a
       try {
         const amount = parseFloat(deposit.amount);
         if (amount >= 10) {
-          // Check if this is the user's first approved deposit
-          const { count: approvedDeposits } = await supabase
-            .from('deposits')
-            .select('*', { count: 'exact', head: true })
-            .eq('user_id', deposit.user_id)
-            .eq('status', 'approved');
+          // Check if user was referred and bonus is unpaid
+          const { data: referral } = await supabase
+            .from('referrals')
+            .select('*')
+            .eq('referred_id', deposit.user_id)
+            .eq('bonus_paid', false)
+            .maybeSingle();
 
-          // If this is the first approved deposit (count will be 0 before this one is updated)
-          if (approvedDeposits === 0) {
-            // Check if user was referred
-            const { data: referral } = await supabase
-              .from('referrals')
+          if (referral) {
+            const referrerId = referral.referrer_id;
+            
+            // Get referrer's wallet
+            const { data: referrerWallet } = await supabase
+              .from('wallets')
               .select('*')
-              .eq('referred_id', deposit.user_id)
-              .eq('bonus_paid', false)
-              .maybeSingle();
+              .eq('user_id', referrerId)
+              .single();
 
-            if (referral) {
-              const referrerId = referral.referrer_id;
-              
-              // Get referrer's wallet
-              const { data: referrerWallet } = await supabase
+            if (referrerWallet) {
+              const bonusAmount = parseFloat(referral.bonus_amount || '2.00');
+              const referrerNewBalance = parseFloat(referrerWallet.balance) + bonusAmount;
+
+              // Update referrer's wallet
+              await supabase
                 .from('wallets')
-                .select('*')
-                .eq('user_id', referrerId)
-                .single();
+                .update({ balance: referrerNewBalance, updated_at: new Date().toISOString() })
+                .eq('id', referrerWallet.id);
 
-              if (referrerWallet) {
-                const bonusAmount = parseFloat(referral.bonus_amount || '2.00');
-                const referrerNewBalance = parseFloat(referrerWallet.balance) + bonusAmount;
+              // Insert transaction for referrer
+              await supabase.from('wallet_transactions').insert([{
+                wallet_id: referrerWallet.id,
+                amount: bonusAmount,
+                type: 'referral_bonus',
+                balance_after: referrerNewBalance,
+                reference_id: referral.id,
+                description: `Bônus por indicação de amigo (${deposit.user_id})`
+              }]);
 
-                // Update referrer's wallet
-                await supabase
-                  .from('wallets')
-                  .update({ balance: referrerNewBalance, updated_at: new Date().toISOString() })
-                  .eq('id', referrerWallet.id);
+              // Mark referral as paid
+              await supabase
+                .from('referrals')
+                .update({ bonus_paid: true, updated_at: new Date().toISOString() })
+                .eq('id', referral.id);
 
-                // Insert transaction for referrer
-                await supabase.from('wallet_transactions').insert([{
-                  wallet_id: referrerWallet.id,
-                  amount: bonusAmount,
-                  type: 'referral_bonus',
-                  balance_after: referrerNewBalance,
-                  reference_id: referral.id,
-                  description: `Bônus por indicação de amigo (${deposit.user_id})`
-                }]);
-
-                // Mark referral as paid
-                await supabase
-                  .from('referrals')
-                  .update({ bonus_paid: true, updated_at: new Date().toISOString() })
-                  .eq('id', referral.id);
-
-                // Notify referrer
-                const { data: settingRef } = await supabase.from('settings').select('value').eq('key', 'admin_notifications').maybeSingle();
-                let refNotifications = [];
-                if (settingRef?.value) {
-                  try {
-                    refNotifications = JSON.parse(settingRef.value);
-                  } catch (e) {
-                    refNotifications = [];
-                  }
+              // Notify referrer
+              const { data: settingRef } = await supabase.from('settings').select('value').eq('key', 'admin_notifications').maybeSingle();
+              let refNotifications = [];
+              if (settingRef?.value) {
+                try {
+                  refNotifications = JSON.parse(settingRef.value);
+                } catch (e) {
+                  refNotifications = [];
                 }
-
-                const refNotification = {
-                  id: `ref-bon-${Date.now()}`,
-                  title: '🎁 Bônus de Indicação!',
-                  message: `Você recebeu R$ ${bonusAmount.toFixed(2)} de bônus porque seu amigo fez o primeiro depósito!`,
-                  type: 'success',
-                  target_type: 'individual',
-                  user_id: referrerId,
-                  created_at: new Date().toISOString()
-                };
-
-                refNotifications.unshift(refNotification);
-                if (refNotifications.length > 100) refNotifications = refNotifications.slice(0, 100);
-
-                await supabase
-                  .from('settings')
-                  .upsert({ key: 'admin_notifications', value: JSON.stringify(refNotifications) }, { onConflict: 'key' });
-
-                sendRealtimeNotification(referrerId, {
-                  type: 'notification',
-                  data: refNotification
-                });
               }
+
+              const refNotification = {
+                id: `ref-bon-${Date.now()}`,
+                title: '🎁 Bônus de Indicação!',
+                message: `Você recebeu R$ ${bonusAmount.toFixed(2)} de bônus porque seu amigo fez o primeiro depósito!`,
+                type: 'success',
+                target_type: 'individual',
+                user_id: referrerId,
+                created_at: new Date().toISOString()
+              };
+
+              refNotifications.unshift(refNotification);
+              if (refNotifications.length > 100) refNotifications = refNotifications.slice(0, 100);
+
+              await supabase
+                .from('settings')
+                .upsert({ key: 'admin_notifications', value: JSON.stringify(refNotifications) }, { onConflict: 'key' });
+
+              sendRealtimeNotification(referrerId, {
+                type: 'notification',
+                data: refNotification
+              });
             }
           }
         }
