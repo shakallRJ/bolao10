@@ -717,6 +717,42 @@ const LoginPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
   );
 };
 
+const getTransactionIcon = (type: string, amount: number) => {
+  switch (type) {
+    case 'deposit': return <ArrowDownCircle className="w-5 h-5" />;
+    case 'withdrawal': return <ArrowUpCircle className="w-5 h-5" />;
+    case 'prediction_fee': return <Trophy className="w-5 h-5" />;
+    case 'referral_bonus': return <Gift className="w-5 h-5" />;
+    case 'prize_credit': return <Trophy className="w-5 h-5" />;
+    case 'admin_adjustment': return <ShieldCheck className="w-5 h-5" />;
+    default: return amount > 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />;
+  }
+};
+
+const getTransactionColor = (type: string, amount: number) => {
+  switch (type) {
+    case 'deposit': return 'bg-green-100 text-green-600';
+    case 'withdrawal': return 'bg-red-100 text-red-600';
+    case 'prediction_fee': return 'bg-orange-100 text-orange-600';
+    case 'referral_bonus': return 'bg-purple-100 text-purple-600';
+    case 'prize_credit': return 'bg-yellow-100 text-yellow-600';
+    case 'admin_adjustment': return 'bg-blue-100 text-blue-600';
+    default: return amount > 0 ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600';
+  }
+};
+
+const getTransactionLabel = (type: string) => {
+  switch (type) {
+    case 'deposit': return 'Depósito';
+    case 'withdrawal': return 'Saque';
+    case 'prediction_fee': return 'Taxa de Palpite';
+    case 'referral_bonus': return 'Bônus de Indicação';
+    case 'prize_credit': return 'Prêmio';
+    case 'admin_adjustment': return 'Ajuste Admin';
+    default: return 'Transação';
+  }
+};
+
 const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
   const { token, user } = useAuth();
   const [walletData, setWalletData] = useState<any>(null);
@@ -1034,11 +1070,21 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
             <div className="space-y-4">
               {walletData.pendingDeposits.map((d: any) => (
                 <div key={d.id} className="p-4 bg-orange-50 border border-orange-100 rounded-2xl flex justify-between items-center">
-                  <div>
-                    <p className="font-bold text-orange-800">Depósito via PIX</p>
-                    <p className="text-xs text-orange-500 mt-1">Solicitado em: {formatDate(d.created_at, 'dd/MM/yyyy HH:mm')}</p>
+                  <div className="flex items-center space-x-4">
+                    <div className="w-10 h-10 rounded-full flex items-center justify-center bg-orange-100 text-orange-600">
+                      <ArrowDownCircle className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-orange-800">Depósito via PIX</p>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider bg-orange-100 text-orange-700">Pendente</span>
+                      </div>
+                      <p className="text-xs text-orange-500 mt-1">Solicitado em: {formatDate(d.created_at, 'dd/MM/yyyy HH:mm')}</p>
+                    </div>
                   </div>
-                  <p className="font-bold text-orange-600">R$ {d.amount.toFixed(2)}</p>
+                  <div className="text-right">
+                    <p className="font-bold text-orange-600">R$ {d.amount.toFixed(2)}</p>
+                  </div>
                 </div>
               ))}
             </div>
@@ -1053,12 +1099,22 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
             <div className="space-y-4">
               {walletData.pendingWithdrawals.map((w: any) => (
                 <div key={w.id} className="p-4 bg-blue-50 border border-blue-100 rounded-2xl flex justify-between items-center">
-                  <div>
-                    <p className="font-bold text-blue-800">Saque PIX</p>
-                    <p className="text-sm text-blue-600">Chave: {w.reference_id?.replace('pending_', '')}</p>
-                    <p className="text-xs text-blue-500 mt-1">Solicitado em: {formatDate(w.created_at, 'dd/MM/yyyy HH:mm')}</p>
+                  <div className="flex items-center space-x-4">
+                    <div className="w-10 h-10 rounded-full flex items-center justify-center bg-blue-100 text-blue-600">
+                      <ArrowUpCircle className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-blue-800">Saque PIX</p>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider bg-blue-100 text-blue-700">Pendente</span>
+                      </div>
+                      <p className="text-sm text-blue-600 mt-0.5">Chave: {w.reference_id?.replace('pending_', '')}</p>
+                      <p className="text-xs text-blue-500 mt-0.5">Solicitado em: {formatDate(w.created_at, 'dd/MM/yyyy HH:mm')}</p>
+                    </div>
                   </div>
-                  <p className="font-bold text-blue-600">R$ {Math.abs(w.amount).toFixed(2)}</p>
+                  <div className="text-right">
+                    <p className="font-bold text-blue-600">R$ {Math.abs(w.amount).toFixed(2)}</p>
+                  </div>
                 </div>
               ))}
             </div>
@@ -1073,14 +1129,17 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
             {transactions.length > 0 ? transactions.map((tx: any) => (
               <div key={tx.id} className="flex items-center justify-between p-4 border border-gray-100 rounded-2xl bg-gray-50">
                 <div className="flex items-center space-x-4">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                    tx.amount > 0 ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
-                  }`}>
-                    {tx.amount > 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${getTransactionColor(tx.type, tx.amount)}`}>
+                    {getTransactionIcon(tx.type, tx.amount)}
                   </div>
                   <div>
-                    <p className="font-bold text-gray-900">{tx.description}</p>
-                    <p className="text-xs text-gray-500">{formatDate(tx.created_at, 'dd/MM/yyyy HH:mm')}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="font-bold text-gray-900">{tx.description}</p>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${getTransactionColor(tx.type, tx.amount)}`}>
+                        {getTransactionLabel(tx.type)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5">{formatDate(tx.created_at, 'dd/MM/yyyy HH:mm')}</p>
                   </div>
                 </div>
                 <div className="text-right">
