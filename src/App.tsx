@@ -717,36 +717,39 @@ const LoginPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
   );
 };
 
-const getTransactionIcon = (type: string, amount: number) => {
+const getTransactionIcon = (type: string, amount: number, description: string = '') => {
+  if (type === 'prize_credit' && description.toLowerCase().includes('indicação')) return <Gift className="w-5 h-5" />;
+  
   switch (type) {
     case 'deposit': return <ArrowDownCircle className="w-5 h-5" />;
     case 'withdrawal': return <ArrowUpCircle className="w-5 h-5" />;
-    case 'prediction_fee': return <Trophy className="w-5 h-5" />;
-    case 'referral_bonus': return <Gift className="w-5 h-5" />;
+    case 'bet_deduction': return <Trophy className="w-5 h-5" />;
     case 'prize_credit': return <Trophy className="w-5 h-5" />;
     case 'admin_adjustment': return <ShieldCheck className="w-5 h-5" />;
     default: return amount > 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />;
   }
 };
 
-const getTransactionColor = (type: string, amount: number) => {
+const getTransactionColor = (type: string, amount: number, description: string = '') => {
+  if (type === 'prize_credit' && description.toLowerCase().includes('indicação')) return 'bg-purple-100 text-purple-600';
+
   switch (type) {
     case 'deposit': return 'bg-green-100 text-green-600';
     case 'withdrawal': return 'bg-red-100 text-red-600';
-    case 'prediction_fee': return 'bg-orange-100 text-orange-600';
-    case 'referral_bonus': return 'bg-purple-100 text-purple-600';
+    case 'bet_deduction': return 'bg-orange-100 text-orange-600';
     case 'prize_credit': return 'bg-yellow-100 text-yellow-600';
     case 'admin_adjustment': return 'bg-blue-100 text-blue-600';
     default: return amount > 0 ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600';
   }
 };
 
-const getTransactionLabel = (type: string) => {
+const getTransactionLabel = (type: string, description: string = '') => {
+  if (type === 'prize_credit' && description.toLowerCase().includes('indicação')) return 'Bônus de Indicação';
+
   switch (type) {
     case 'deposit': return 'Depósito';
     case 'withdrawal': return 'Saque';
-    case 'prediction_fee': return 'Taxa de Palpite';
-    case 'referral_bonus': return 'Bônus de Indicação';
+    case 'bet_deduction': return 'Taxa de Palpite';
     case 'prize_credit': return 'Prêmio';
     case 'admin_adjustment': return 'Ajuste Admin';
     default: return 'Transação';
@@ -1129,14 +1132,14 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
             {transactions.length > 0 ? transactions.map((tx: any) => (
               <div key={tx.id} className="flex items-center justify-between p-4 border border-gray-100 rounded-2xl bg-gray-50">
                 <div className="flex items-center space-x-4">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${getTransactionColor(tx.type, tx.amount)}`}>
-                    {getTransactionIcon(tx.type, tx.amount)}
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${getTransactionColor(tx.type, tx.amount, tx.description)}`}>
+                    {getTransactionIcon(tx.type, tx.amount, tx.description)}
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
                       <p className="font-bold text-gray-900">{tx.description}</p>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${getTransactionColor(tx.type, tx.amount)}`}>
-                        {getTransactionLabel(tx.type)}
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${getTransactionColor(tx.type, tx.amount, tx.description)}`}>
+                        {getTransactionLabel(tx.type, tx.description)}
                       </span>
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5">{formatDate(tx.created_at, 'dd/MM/yyyy HH:mm')}</p>
@@ -2461,6 +2464,8 @@ const AdminDashboard = () => {
   const [financialDetails, setFinancialDetails] = useState<any>({ jackpotPool: 0, prizesHistory: [], withdrawalsHistory: [] });
   const [newWithdrawal, setNewWithdrawal] = useState({ amount: '', reason: '' });
   const [showWithdrawalForm, setShowWithdrawalForm] = useState(false);
+  const [newJackpotInjection, setNewJackpotInjection] = useState({ amount: '', description: '' });
+  const [showJackpotForm, setShowJackpotForm] = useState(false);
   const [adminNotifications, setAdminNotifications] = useState<any[]>([]);
   const [sentNotifications, setSentNotifications] = useState<any[]>([]);
   const [referrals, setReferrals] = useState<any[]>([]);
@@ -2549,6 +2554,24 @@ const AdminDashboard = () => {
       alert('Saque registrado com sucesso!');
       setNewWithdrawal({ amount: '', reason: '' });
       setShowWithdrawalForm(false);
+      fetchFinancialDetails();
+    }
+  };
+
+  const handleInjectJackpot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const res = await fetch('/api/admin/jackpot/inject', {
+      method: 'POST',
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(newJackpotInjection)
+    });
+    if (res.ok) {
+      alert('Bônus injetado com sucesso!');
+      setNewJackpotInjection({ amount: '', description: '' });
+      setShowJackpotForm(false);
       fetchFinancialDetails();
     }
   };
@@ -3453,6 +3476,57 @@ const AdminDashboard = () => {
               </div>
             </div>
 
+            {/* Jackpot Injection Form */}
+            <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+              <div className="p-6 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                <h3 className="font-bold text-primary flex items-center gap-2">
+                  <Gift className="w-5 h-5 text-purple-500" />
+                  Injetar Patrocínio no Bônus (Jackpot)
+                </h3>
+                <button 
+                  onClick={() => setShowJackpotForm(!showJackpotForm)}
+                  className="text-xs bg-purple-600 text-white px-4 py-1.5 rounded-full hover:bg-purple-700 transition-colors font-bold shadow-sm"
+                >
+                  {showJackpotForm ? 'Cancelar' : '+ Injetar Bônus'}
+                </button>
+              </div>
+              
+              {showJackpotForm && (
+                <div className="p-6 bg-purple-50 border-b border-gray-100">
+                  <form onSubmit={handleInjectJackpot} className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Valor do Patrocínio (R$)</label>
+                        <input 
+                          type="number" 
+                          step="0.01"
+                          required
+                          value={newJackpotInjection.amount}
+                          onChange={(e) => setNewJackpotInjection({...newJackpotInjection, amount: e.target.value})}
+                          className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-purple-500 outline-none"
+                          placeholder="Ex: 100.00"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Descrição / Patrocinador</label>
+                        <input 
+                          type="text" 
+                          required
+                          value={newJackpotInjection.description}
+                          onChange={(e) => setNewJackpotInjection({...newJackpotInjection, description: e.target.value})}
+                          className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-purple-500 outline-none"
+                          placeholder="Ex: Patrocínio NavalTech"
+                        />
+                      </div>
+                    </div>
+                    <button type="submit" className="w-full bg-purple-600 text-white font-bold py-2.5 rounded-xl hover:bg-purple-700 transition-colors shadow-md flex items-center justify-center gap-2">
+                      <TrendingUp className="w-4 h-4" /> Confirmar Injeção de Bônus
+                    </button>
+                  </form>
+                </div>
+              )}
+            </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {/* Prizes History */}
             <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
@@ -4336,6 +4410,54 @@ const AdminRoundsPage = () => {
   );
 };
 
+const Podium = ({ top3, roundStatus }: { top3: any[], roundStatus?: string }) => {
+  if (!top3 || top3.length === 0) return null;
+
+  // Reorder to 2, 1, 3 for podium look
+  const podiumOrder = [];
+  if (top3[1]) podiumOrder.push({ ...top3[1], pos: 2 });
+  if (top3[0]) podiumOrder.push({ ...top3[0], pos: 1 });
+  if (top3[2]) podiumOrder.push({ ...top3[2], pos: 3 });
+
+  return (
+    <div className="flex items-end justify-center gap-2 md:gap-6 mb-12 mt-8 px-2">
+      {podiumOrder.map((item) => (
+        <div key={item.id} className={`flex flex-col items-center transition-all duration-700 ${item.pos === 1 ? 'z-10 scale-110 md:scale-125' : 'z-0'}`}>
+          <div className="mb-3 text-center px-1">
+            <p className="text-[9px] md:text-[10px] font-black text-gray-400 uppercase tracking-tighter mb-1">
+              {item.pos === 1 ? '🏆 Campeão' : item.pos === 2 ? '🥈 2º Lugar' : '🥉 3º Lugar'}
+            </p>
+            <p className="text-[10px] md:text-xs font-black text-primary truncate max-w-[70px] md:max-w-[100px]">
+              {item.user_name}
+            </p>
+          </div>
+          
+          <div className={`relative flex flex-col items-center justify-end rounded-t-[20px] md:rounded-t-[32px] shadow-xl border-x border-t border-white/20 ${
+            item.pos === 1 
+              ? 'w-24 md:w-32 h-32 md:h-40 bg-gradient-to-b from-yellow-400 via-yellow-500 to-yellow-600' 
+              : item.pos === 2 
+                ? 'w-20 md:w-28 h-24 md:h-32 bg-gradient-to-b from-gray-200 via-gray-300 to-gray-400' 
+                : 'w-20 md:w-28 h-20 md:h-24 bg-gradient-to-b from-orange-300 via-orange-400 to-orange-500'
+          }`}>
+            <div className="absolute -top-4 md:-top-6 bg-white rounded-full p-2 md:p-3 shadow-xl border-2 border-gray-50">
+              {item.pos === 1 ? <Trophy className="w-5 h-5 md:w-8 md:h-8 text-yellow-500" /> : 
+               item.pos === 2 ? <Trophy className="w-4 h-4 md:w-6 md:h-6 text-gray-400" /> : 
+               <Trophy className="w-4 h-4 md:w-6 md:h-6 text-orange-500" />}
+            </div>
+            
+            <div className="pb-4 md:pb-6 text-center text-white">
+              <p className="text-lg md:text-2xl font-black leading-none">{item.score}</p>
+              <p className="text-[8px] md:text-[10px] font-bold opacity-70 uppercase tracking-widest mt-1">
+                Pontos
+              </p>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const RankingPage = () => {
   const { token, isAdmin } = useAuth();
   const [rounds, setRounds] = useState<any[]>([]);
@@ -4389,77 +4511,134 @@ const RankingPage = () => {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4">
-        <div>
-          <h2 className="text-3xl font-bold text-primary">Ranking</h2>
-          <div className="mt-2 flex items-center gap-3">
-            <p className="text-gray-500">Selecione a Rodada:</p>
-            <select 
-              value={selectedRoundId}
-              onChange={(e) => setSelectedRoundId(e.target.value)}
-              className="bg-white border border-gray-200 rounded-xl px-3 py-1 text-sm font-bold outline-none focus:ring-2 focus:ring-secondary"
-            >
-              {rounds.map(r => (
-                <option key={r.id} value={r.id}>Rodada #{r.number}</option>
+      <div className="flex flex-col md:flex-row justify-between items-center md:items-end mb-8 gap-6 text-center md:text-left">
+        <div className="w-full">
+          <div className="flex items-center justify-center md:justify-start gap-3 mb-2">
+            <div className="w-10 h-10 bg-primary/10 rounded-2xl flex items-center justify-center text-primary">
+              <Trophy className="w-6 h-6" />
+            </div>
+            <h2 className="text-3xl md:text-4xl font-black text-primary tracking-tight">Ranking</h2>
+          </div>
+          
+          <div className="flex flex-col md:flex-row items-center gap-3 bg-gray-50 p-4 rounded-3xl border border-gray-100">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Selecione a Rodada</p>
+            <div className="flex flex-wrap justify-center gap-2">
+              {rounds.slice(0, 5).map(r => (
+                <button
+                  key={r.id}
+                  onClick={() => setSelectedRoundId(r.id.toString())}
+                  className={`px-4 py-2 rounded-2xl text-sm font-bold transition-all ${
+                    selectedRoundId === r.id.toString()
+                      ? 'bg-primary text-white shadow-lg shadow-primary/20 scale-105'
+                      : 'bg-white text-gray-500 border border-gray-200 hover:border-primary/30'
+                  }`}
+                >
+                  #{r.number}
+                </button>
               ))}
-            </select>
+              {rounds.length > 5 && (
+                <select 
+                  value={selectedRoundId}
+                  onChange={(e) => setSelectedRoundId(e.target.value)}
+                  className="bg-white border border-gray-200 rounded-2xl px-4 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="" disabled>Outras...</option>
+                  {rounds.slice(5).map(r => (
+                    <option key={r.id} value={r.id}>Rodada #{r.number}</option>
+                  ))}
+                </select>
+              )}
+            </div>
           </div>
         </div>
       </div>
 
       {!hasAccess ? (
-        <div className="bg-white p-12 rounded-[40px] border border-dashed border-gray-200 text-center">
-          <ShieldCheck className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+        <div className="bg-white p-8 md:p-12 rounded-[32px] md:rounded-[40px] border border-dashed border-gray-200 text-center">
+          <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4">
+            <ShieldCheck className="w-8 h-8 text-gray-300" />
+          </div>
           <h3 className="text-xl font-bold text-primary mb-2">Acesso Restrito</h3>
-          <p className="text-gray-500 max-w-md mx-auto">
+          <p className="text-gray-500 max-w-md mx-auto text-sm md:text-base">
             Você só pode visualizar o ranking de rodadas em que possui palpites validados.
           </p>
         </div>
       ) : (
-        <div className="bg-white rounded-[40px] border border-gray-100 shadow-sm overflow-hidden">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">
-                <th className="px-8 py-5">Posição</th>
-                <th className="px-8 py-5">Usuário</th>
-                <th className="px-8 py-5 text-right">Pontuação</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
+        <>
+          {ranking.length > 0 && <Podium top3={ranking.slice(0, 3)} roundStatus={selectedRound?.status} />}
+
+          <div className="bg-white rounded-[32px] md:rounded-[40px] border border-gray-100 shadow-xl shadow-primary/5 overflow-hidden">
+            {/* Header for Desktop */}
+            <div className="hidden md:grid grid-cols-12 bg-gray-50 text-[10px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100 px-8 py-4">
+              <div className="col-span-2">Posição</div>
+              <div className="col-span-7">Participante</div>
+              <div className="col-span-3 text-right">Pontuação</div>
+            </div>
+
+            <div className="divide-y divide-gray-100">
               {ranking.map((item, index) => (
-                <tr key={item.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-8 py-5">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
-                      index === 0 ? 'bg-yellow-100 text-yellow-700' : 
-                      index === 1 ? 'bg-gray-100 text-gray-700' :
-                      index === 2 ? 'bg-orange-100 text-orange-700' : 'text-gray-400'
+                <div 
+                  key={item.id} 
+                  className={`group hover:bg-gray-50 transition-all px-4 md:px-8 py-4 md:py-5 grid grid-cols-12 items-center gap-3 ${
+                    index < 3 ? 'bg-primary/[0.02]' : ''
+                  }`}
+                >
+                  {/* Position */}
+                  <div className="col-span-2 md:col-span-2">
+                    <div className={`w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center font-black text-xs md:text-sm transition-transform group-hover:scale-110 ${
+                      index === 0 ? 'bg-yellow-100 text-yellow-700 border-2 border-yellow-200' : 
+                      index === 1 ? 'bg-gray-100 text-gray-600 border-2 border-gray-200' :
+                      index === 2 ? 'bg-orange-100 text-orange-700 border-2 border-orange-200' : 
+                      'bg-white text-gray-400 border border-gray-100'
                     }`}>
                       {index + 1}º
                     </div>
-                  </td>
-                  <td className="px-8 py-5 font-bold text-primary">{item.user_name}</td>
-                  <td className="px-8 py-5 text-right">
-                    <div className="flex flex-col items-end">
-                      <span className={`${selectedRound?.status === 'finished' ? 'bg-secondary text-white' : 'bg-blue-100 text-blue-700'} px-4 py-1 rounded-full font-bold`}>
-                        {item.score !== null && item.score !== undefined ? `${item.score} pts` : '0 pts'}
-                      </span>
-                      {selectedRound?.status !== 'finished' && (
-                        <span className="text-[10px] font-bold text-blue-500 uppercase mt-1">Parcial</span>
+                  </div>
+
+                  {/* User Name */}
+                  <div className="col-span-7 md:col-span-7">
+                    <div className="flex flex-col">
+                      <p className="font-bold text-primary text-sm md:text-base truncate">
+                        {item.user_name}
+                      </p>
+                      {index < 3 && (
+                        <span className="text-[8px] md:text-[10px] font-black text-gray-400 uppercase tracking-tighter">
+                          {index === 0 ? '🥇 Líder da Rodada' : index === 1 ? '🥈 Vice-Líder' : '🥉 3º Colocado'}
+                        </span>
                       )}
                     </div>
-                  </td>
-                </tr>
+                  </div>
+
+                  {/* Score */}
+                  <div className="col-span-3 md:col-span-3 text-right">
+                    <div className="flex flex-col items-end">
+                      <div className={`flex items-center gap-1.5 px-3 md:px-4 py-1.5 rounded-2xl font-black text-xs md:text-sm shadow-sm transition-all group-hover:translate-x-[-4px] ${
+                        selectedRound?.status === 'finished' 
+                          ? 'bg-secondary text-white shadow-secondary/20' 
+                          : 'bg-white text-blue-600 border border-blue-100 shadow-blue-100/50'
+                      }`}>
+                        <span>{item.score || 0}</span>
+                        <span className="text-[8px] md:text-[10px] opacity-70 uppercase">pts</span>
+                      </div>
+                      {selectedRound?.status !== 'finished' && (
+                        <span className="text-[8px] md:text-[9px] font-black text-blue-400 uppercase mt-1 tracking-tighter">Parcial</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
               ))}
+              
               {ranking.length === 0 && !loading && (
-                <tr>
-                  <td colSpan={3} className="px-8 py-20 text-center text-gray-500">
-                    Nenhum resultado disponível para esta rodada.
-                  </td>
-                </tr>
+                <div className="px-8 py-20 text-center">
+                  <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Trophy className="w-8 h-8 text-gray-200" />
+                  </div>
+                  <p className="text-gray-400 font-medium">Nenhum resultado disponível para esta rodada.</p>
+                </div>
               )}
-            </tbody>
-          </table>
-        </div>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
@@ -4546,7 +4725,62 @@ const TermsPage = () => {
 
 export default function App() {
   const [page, setPage] = useState('landing');
-  const { isAuthenticated, isAdmin } = useAuth();
+  const { isAuthenticated, isAdmin, token } = useAuth();
+
+  // Push Notifications Setup
+  useEffect(() => {
+    if (!isAuthenticated || !token) return;
+
+    const registerPush = async () => {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        console.log('Push notifications not supported');
+        return;
+      }
+
+      try {
+        const registration = await navigator.serviceWorker.register('/sw.js');
+        const permission = await Notification.requestPermission();
+        
+        if (permission === 'granted') {
+          const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+          if (!vapidPublicKey) return;
+
+          const subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
+          });
+
+          await fetch('/api/push-subscriptions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ subscription })
+          });
+        }
+      } catch (err) {
+        console.error('Error registering push:', err);
+      }
+    };
+
+    registerPush();
+  }, [isAuthenticated, token]);
+
+  function urlBase64ToUint8Array(base64String: string) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding)
+      .replace(/\-/g, '+')
+      .replace(/_/g, '/');
+
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+
+    for (let i = 0; i < rawData.length; ++i) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+  }
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);

@@ -17,9 +17,53 @@ const httpServer = createServer(app);
 const PORT = 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'bolao10-secret-key-2024';
 
+import webpush from 'web-push';
+
 // WebSocket Server
 const wss = new WebSocketServer({ server: httpServer });
 const clients = new Map<string, WebSocket>();
+
+// Web Push Configuration
+const vapidPublicKey = process.env.VITE_VAPID_PUBLIC_KEY || '';
+const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY || '';
+const vapidEmail = process.env.VAPID_EMAIL || 'mailto:admin@bolao10.com';
+
+if (vapidPublicKey && vapidPrivateKey) {
+  webpush.setVapidDetails(vapidEmail, vapidPublicKey, vapidPrivateKey);
+}
+
+const sendPushNotification = async (userId: string, payload: any) => {
+  try {
+    const { data: subs } = await supabase
+      .from('push_subscriptions')
+      .select('subscription')
+      .eq('user_id', userId);
+
+    if (subs && subs.length > 0) {
+      const results = await Promise.allSettled(
+        subs.map(s => webpush.sendNotification(s.subscription, JSON.stringify(payload)))
+      );
+      
+      // Clean up failed subscriptions
+      const failedIndices = results
+        .map((r, i) => r.status === 'rejected' && (r as any).reason?.statusCode === 410 ? i : -1)
+        .filter(i => i !== -1);
+
+      if (failedIndices.length > 0) {
+        const failedSubs = failedIndices.map(i => subs[i].subscription);
+        for (const sub of failedSubs) {
+          await supabase
+            .from('push_subscriptions')
+            .delete()
+            .eq('user_id', userId)
+            .eq('subscription', sub);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error sending push notification:', err);
+  }
+};
 
 const sendRealtimeNotification = (userId: string | 'all', notification: any) => {
   const payload = JSON.stringify(notification);
@@ -173,7 +217,7 @@ app.post('/api/auth/register', async (req, res) => {
 
     let referredById = null;
     if (referralCode) {
-      const { data: referrer } = await supabase.from('users').select('id').eq('referral_code', referralCode.trim().toUpperCase()).maybeSingle();
+      const { data: referrer } = await supabase.from('users').select('id').ilike('referral_code', referralCode.trim()).maybeSingle();
       if (referrer) {
         referredById = referrer.id;
       }
@@ -278,6 +322,23 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (err: any) {
     console.error('Login error:', err);
     res.status(500).json({ error: 'Erro interno no servidor' });
+  }
+});
+
+app.post('/api/push-subscriptions', authenticate, async (req: any, res) => {
+  try {
+    const { subscription } = req.body;
+    if (!subscription) return res.status(400).json({ error: 'Subscription is required' });
+
+    const { error } = await supabase
+      .from('push_subscriptions')
+      .upsert({ user_id: req.user.id, subscription }, { onConflict: 'user_id, subscription' });
+
+    if (error) throw error;
+    res.json({ status: 'ok' });
+  } catch (err: any) {
+    console.error('Error saving push subscription:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -777,7 +838,7 @@ app.post('/api/predictions', authenticate, upload.single('proof'), async (req: a
     await supabase.from('wallet_transactions').insert({
       wallet_id: wallet.id,
       amount: -totalCost,
-      type: 'prediction_fee',
+      type: 'bet_deduction',
       description: `Pagamento de palpites para rodada #${round.number || rId}`
     });
 
@@ -1119,7 +1180,7 @@ app.post('/api/admin/deposits/:id/approve', authenticate, isAdmin, async (req: a
               await supabase.from('wallet_transactions').insert([{
                 wallet_id: referrerWallet.id,
                 amount: bonusAmount,
-                type: 'referral_bonus',
+                type: 'prize_credit',
                 balance_after: referrerNewBalance,
                 reference_id: referral.id,
                 description: `Bônus por indicação de amigo (${deposit.user_id})`
@@ -1556,6 +1617,27 @@ app.post('/api/admin/withdrawals', authenticate, isAdmin, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Falha ao registrar saque' });
+  }
+});
+
+app.post('/api/admin/jackpot/inject', authenticate, isAdmin, async (req, res) => {
+  const { amount, description } = req.body;
+  if (!amount) return res.status(400).json({ error: 'Valor é obrigatório' });
+
+  try {
+    const { data: jackpotSetting } = await supabase.from('settings').select('value').eq('key', 'jackpot_pool').maybeSingle();
+    const currentJackpot = parseFloat(jackpotSetting?.value || '0');
+    const newJackpot = currentJackpot + parseFloat(amount);
+    
+    await supabase.from('settings').upsert({ key: 'jackpot_pool', value: newJackpot.toString() }, { onConflict: 'key' });
+    
+    // Also record in a log or history if needed
+    console.log(`Admin injected R$ ${amount} into jackpot. Reason: ${description}`);
+    
+    res.json({ success: true, newJackpot });
+  } catch (err) {
+    console.error('Error injecting jackpot:', err);
+    res.status(500).json({ error: 'Falha ao injetar bônus' });
   }
 });
 
@@ -2020,6 +2102,24 @@ app.post('/api/admin/rounds/:id/finish', authenticate, isAdmin, async (req, res)
           created_at: new Date().toISOString()
         }
       });
+    }
+
+    // 5. Send Push Notifications to all participants
+    if (scoredPredictions && scoredPredictions.length > 0) {
+      for (const p of scoredPredictions) {
+        const isWinner = winnersData.some(w => w.user_id === p.user_id);
+        const title = isWinner ? '🏆 Você Ganhou!' : '🏁 Rodada Finalizada';
+        const message = isWinner 
+          ? `Parabéns! Você venceu a Rodada #${round.number} com ${p.score} pontos!` 
+          : `A Rodada #${round.number} terminou. Você fez ${p.score} pontos. Confira o ranking!`;
+
+        sendPushNotification(p.user_id, {
+          title,
+          body: message,
+          icon: '/logo.png', // Assuming a logo exists
+          data: { url: '/ranking' }
+        });
+      }
     }
 
     if (jackpotWinnerNames) {
