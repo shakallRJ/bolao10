@@ -43,7 +43,8 @@ import {
   XCircle,
   Users,
   ArrowUpCircle,
-  ArrowDownCircle
+  ArrowDownCircle,
+  Landmark
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -3215,13 +3216,13 @@ const AdminDashboard = () => {
           <div className="space-y-8">
             {/* Summary Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
-              <div className="bg-white p-6 rounded-3xl border-l-4 border-green-500 shadow-sm flex justify-between items-center">
+              <div className="bg-white p-6 rounded-3xl border-l-4 border-primary shadow-sm flex justify-between items-center">
                 <div>
-                  <p className="text-xs font-bold text-gray-400 uppercase mb-1">Saldo Total em Carteiras</p>
+                  <p className="text-xs font-bold text-gray-400 uppercase mb-1">BANCO Bolão 10 (Total em Carteiras)</p>
                   <p className="text-2xl font-bold text-primary">R$ {totalBalance.toFixed(2)}</p>
                 </div>
-                <div className="w-12 h-12 bg-green-50 text-green-500 rounded-full flex items-center justify-center">
-                  <Wallet className="w-6 h-6" />
+                <div className="w-12 h-12 bg-blue-50 text-primary rounded-full flex items-center justify-center">
+                  <Landmark className="w-6 h-6" />
                 </div>
               </div>
 

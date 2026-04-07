@@ -59,17 +59,31 @@ export const PromoPopup: React.FC<PromoPopupProps> = ({ onNavigate }) => {
               </div>
             </div>
 
-            <h2 className="text-xl sm:text-2xl font-black text-white mb-6 drop-shadow-lg leading-tight">
-              🚀 NOVIDADE: CARTEIRA VIRTUAL BOLÃO10! 🚀
+            <h2 className="text-xl sm:text-2xl font-black text-white mb-6 drop-shadow-lg leading-tight uppercase">
+              🔥 O PATRÃO FICOU MALUCO! O PRÊMIO DO BOLÃO 10 EXPLODIU! 🚀
             </h2>
             
-            <div className="space-y-4 text-gray-300 font-medium text-base sm:text-lg leading-relaxed">
+            <div className="space-y-4 text-gray-300 font-medium text-sm sm:text-base leading-relaxed text-left">
               <p>
-                Agora ficou muito mais fácil jogar! Adicione saldo à sua <strong className="text-amber-400">Carteira Virtual</strong> via PIX e faça seus palpites instantaneamente.
+                Atenção, apostadores! Se a motivação que faltava era um empurrãozinho no prêmio, agora você tem uma <strong className="text-amber-400">AVALANCHE</strong> de motivos para mitar na rodada!
               </p>
-              <p className="p-4 bg-white/5 rounded-2xl border border-white/10 shadow-inner">
-                Seus prêmios também caem direto na carteira e você pode solicitar o saque a qualquer momento. Praticidade e rapidez para você focar no que importa: os acertos! 💰
+              <p>
+                O patrão abriu o cofre e adicionou <strong className="text-green-400">R$ 100,00 REAIS EXTRAS</strong> no bônus para quem cravar os 10 ACERTOS! 😱
               </p>
+              <div className="p-4 bg-white/5 rounded-2xl border border-white/10 shadow-inner space-y-2">
+                <p className="font-bold text-amber-400 flex items-center gap-2">
+                  🏆 CONFIRA A NOVA PREMIAÇÃO DO BÔNUS 10:
+                </p>
+                <p className="text-white">Agora, quem gabaritar a rodada leva para casa:</p>
+                <p className="flex items-start gap-2">
+                  <span>💰</span> 
+                  <span><strong className="text-green-400">R$ 135,00 EM DINHEIRO</strong> (Direto na sua carteira!)</span>
+                </p>
+                <p className="flex items-start gap-2">
+                  <span>🎮</span> 
+                  <span><strong>+ 01 VÍDEO GAME STICK M15</strong> (Milhares de jogos clássicos para você se divertir!)</span>
+                </p>
+              </div>
             </div>
           </div>
 
@@ -78,11 +92,11 @@ export const PromoPopup: React.FC<PromoPopupProps> = ({ onNavigate }) => {
             <button
               onClick={() => {
                 setIsOpen(false);
-                onNavigate('wallet');
+                onNavigate('rounds');
               }}
               className="w-full py-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-2xl font-bold text-lg shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:shadow-[0_0_25px_rgba(245,158,11,0.5)] transition-all transform hover:-translate-y-1"
             >
-              👉 ACESSAR MINHA CARTEIRA
+              👉 PALPITAR AGORA E GANHAR!
             </button>
           </div>
         </motion.div>
