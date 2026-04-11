@@ -1533,6 +1533,68 @@ app.get('/api/admin/user-wallets', authenticate, isAdmin, async (req, res) => {
   }
 });
 
+app.post('/api/admin/wallets/deposit', authenticate, isAdmin, async (req: any, res) => {
+  const { userId, amount, description } = req.body;
+  
+  if (!userId || !amount || parseFloat(amount) <= 0) {
+    return res.status(400).json({ error: 'Dados inválidos para depósito' });
+  }
+
+  try {
+    // 1. Get user's wallet
+    const { data: wallet, error: walletErr } = await supabase
+      .from('wallets')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+
+    if (walletErr || !wallet) {
+      return res.status(404).json({ error: 'Carteira não encontrada' });
+    }
+
+    const newBalance = parseFloat(wallet.balance) + parseFloat(amount);
+
+    // 2. Update balance
+    const { error: updateErr } = await supabase
+      .from('wallets')
+      .update({ balance: newBalance, updated_at: new Date().toISOString() })
+      .eq('id', wallet.id);
+
+    if (updateErr) throw updateErr;
+
+    // 3. Record transaction
+    const { error: transErr } = await supabase
+      .from('wallet_transactions')
+      .insert([{
+        wallet_id: wallet.id,
+        amount: parseFloat(amount),
+        type: 'admin_adjustment',
+        balance_after: newBalance,
+        description: description || 'Depósito manual via administrativo'
+      }]);
+
+    if (transErr) throw transErr;
+
+    // 4. Send notification to user
+    sendRealtimeNotification(userId.toString(), {
+      type: 'notification',
+      data: {
+        id: `admin-dep-${Date.now()}`,
+        type: 'admin_msg',
+        msgType: 'success',
+        title: '💰 Depósito Recebido!',
+        message: `Um depósito de R$ ${parseFloat(amount).toFixed(2)} foi adicionado à sua carteira pelo administrador.`,
+        created_at: new Date().toISOString()
+      }
+    });
+
+    res.json({ success: true, newBalance });
+  } catch (err: any) {
+    console.error('Manual deposit error:', err);
+    res.status(500).json({ error: 'Erro ao realizar depósito manual' });
+  }
+});
+
 // Admin: User Management
 app.get('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   try {

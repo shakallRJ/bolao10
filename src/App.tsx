@@ -2487,6 +2487,8 @@ const AdminDashboard = () => {
   
   // Edit User State
   const [editingUser, setEditingUser] = useState<any>(null);
+  const [manualDepositForm, setManualDepositForm] = useState({ userId: '', amount: '', description: '' });
+  const [showManualDepositModal, setShowManualDepositModal] = useState(false);
 
   const fetchPendingDeposits = async () => {
     const res = await fetch('/api/admin/deposits', {
@@ -2574,6 +2576,35 @@ const AdminDashboard = () => {
       setNewJackpotInjection({ amount: '', description: '' });
       setShowJackpotForm(false);
       fetchFinancialDetails();
+    }
+  };
+
+  const handleManualDeposit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualDepositForm.userId || !manualDepositForm.amount) return;
+
+    try {
+      const res = await fetch('/api/admin/wallets/deposit', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(manualDepositForm)
+      });
+
+      if (res.ok) {
+        toast.success('Depósito realizado com sucesso!');
+        setManualDepositForm({ userId: '', amount: '', description: '' });
+        setShowManualDepositModal(false);
+        fetchUserWallets();
+      } else {
+        const error = await res.json();
+        toast.error(error.error || 'Erro ao realizar depósito');
+      }
+    } catch (err) {
+      console.error('Manual deposit error:', err);
+      toast.error('Erro de conexão ao realizar depósito');
     }
   };
 
@@ -3364,6 +3395,7 @@ const AdminDashboard = () => {
                       <th className="px-6 py-4 font-semibold">Total Ganho</th>
                       <th className="px-6 py-4 font-semibold">Saques</th>
                       <th className="px-6 py-4 font-semibold">Histórico de Depósitos</th>
+                      <th className="px-6 py-4 font-semibold">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -3405,6 +3437,18 @@ const AdminDashboard = () => {
                                 ))}
                               </div>
                             )}
+                          </td>
+                          <td className="px-6 py-4">
+                            <button 
+                              onClick={() => {
+                                setManualDepositForm({ ...manualDepositForm, userId: uw.user.id });
+                                setShowManualDepositModal(true);
+                              }}
+                              className="p-2 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 transition-colors"
+                              title="Depósito Manual"
+                            >
+                              <PlusCircle className="w-5 h-5" />
+                            </button>
                           </td>
                         </tr>
                       ))
@@ -3793,6 +3837,58 @@ const AdminDashboard = () => {
               <div className="flex gap-4 pt-4">
                 <button type="button" onClick={() => setEditingUser(null)} className="flex-1 py-2 bg-gray-100 rounded-xl">Cancelar</button>
                 <button type="submit" className="flex-1 py-2 bg-primary text-white rounded-xl font-bold">Salvar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Deposit Modal */}
+      {showManualDepositModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-3xl p-8 max-w-md w-full">
+            <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
+              <PlusCircle className="w-6 h-6 text-blue-500" />
+              Depósito Manual
+            </h3>
+            <form onSubmit={handleManualDeposit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Valor (R$)</label>
+                <input 
+                  type="number" 
+                  step="0.01"
+                  required
+                  value={manualDepositForm.amount}
+                  onChange={(e) => setManualDepositForm({...manualDepositForm, amount: e.target.value})}
+                  className="w-full px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-primary outline-none"
+                  placeholder="0.00"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Motivo / Descrição</label>
+                <input 
+                  type="text" 
+                  required
+                  value={manualDepositForm.description}
+                  onChange={(e) => setManualDepositForm({...manualDepositForm, description: e.target.value})}
+                  className="w-full px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-primary outline-none"
+                  placeholder="Ex: Prêmio de indicação"
+                />
+              </div>
+              <div className="flex gap-4 pt-4">
+                <button 
+                  type="button" 
+                  onClick={() => setShowManualDepositModal(false)} 
+                  className="flex-1 py-2 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit" 
+                  className="flex-1 py-2 bg-primary text-white rounded-xl font-bold hover:bg-secondary transition-colors shadow-md"
+                >
+                  Confirmar Depósito
+                </button>
               </div>
             </form>
           </div>
