@@ -6,7 +6,7 @@ import jwt from 'jsonwebtoken';
 import * as bcrypt from 'bcryptjs';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { supabase } from './src/supabase.js';
+import { supabase } from './src/supabase.ts';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer } from 'http';
 
@@ -26,7 +26,12 @@ const clients = new Map<string, WebSocket>();
 // Web Push Configuration
 const vapidPublicKey = process.env.VITE_VAPID_PUBLIC_KEY || '';
 const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY || '';
-const vapidEmail = process.env.VAPID_EMAIL || 'mailto:admin@bolao10.com';
+let vapidEmail = process.env.VAPID_EMAIL || 'mailto:admin@bolao10.com';
+
+// Ensure vapidEmail is a valid URL (mailto: for emails)
+if (vapidEmail && !vapidEmail.startsWith('http') && !vapidEmail.startsWith('mailto:')) {
+  vapidEmail = `mailto:${vapidEmail}`;
+}
 
 if (vapidPublicKey && vapidPrivateKey) {
   webpush.setVapidDetails(vapidEmail, vapidPublicKey, vapidPrivateKey);
@@ -2271,6 +2276,12 @@ async function startServer() {
       appType: 'spa',
     });
     app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
   }
 
   httpServer.listen(PORT, '0.0.0.0', () => {

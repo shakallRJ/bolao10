@@ -2489,6 +2489,8 @@ const AdminDashboard = () => {
   const [editingUser, setEditingUser] = useState<any>(null);
   const [manualDepositForm, setManualDepositForm] = useState({ userId: '', amount: '', description: '' });
   const [showManualDepositModal, setShowManualDepositModal] = useState(false);
+  const [walletSearch, setWalletSearch] = useState('');
+  const [viewingWalletHistory, setViewingWalletHistory] = useState<any>(null);
 
   const fetchPendingDeposits = async () => {
     const res = await fetch('/api/admin/deposits', {
@@ -3376,14 +3378,26 @@ const AdminDashboard = () => {
             </div>
 
             <div className="bg-white rounded-3xl shadow-sm overflow-hidden border border-gray-100">
-              <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+              <div className="p-6 border-b border-gray-100 flex flex-col sm:flex-row justify-between items-center gap-4">
                 <h3 className="text-xl font-bold text-primary flex items-center gap-2">
                   <Wallet className="w-6 h-6 text-blue-500" />
-                  Carteiras dos Usuários (Saldo Ativo)
+                  Carteiras dos Usuários
                 </h3>
-                <button onClick={fetchUserWallets} className="text-sm text-blue-500 hover:underline">
-                  Atualizar
-                </button>
+                <div className="flex items-center gap-4 w-full sm:w-auto">
+                  <div className="relative flex-grow sm:flex-grow-0">
+                    <input 
+                      type="text" 
+                      placeholder="Buscar por nome ou email..." 
+                      value={walletSearch}
+                      onChange={(e) => setWalletSearch(e.target.value)}
+                      className="w-full sm:w-64 pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-primary outline-none"
+                    />
+                    <Users className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  </div>
+                  <button onClick={fetchUserWallets} className="text-sm text-blue-500 hover:underline shrink-0">
+                    Atualizar
+                  </button>
+                </div>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
@@ -3394,17 +3408,26 @@ const AdminDashboard = () => {
                       <th className="px-6 py-4 font-semibold">Total Depositado</th>
                       <th className="px-6 py-4 font-semibold">Total Ganho</th>
                       <th className="px-6 py-4 font-semibold">Saques</th>
-                      <th className="px-6 py-4 font-semibold">Histórico de Depósitos</th>
+                      <th className="px-6 py-4 font-semibold">Histórico</th>
                       <th className="px-6 py-4 font-semibold">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {userWallets.filter((uw: any) => uw.balance > 0).length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="px-6 py-8 text-center text-gray-400">Nenhuma carteira com saldo ativo encontrada.</td>
-                      </tr>
-                    ) : (
-                      userWallets.filter((uw: any) => uw.balance > 0).map((uw: any) => (
+                    {(() => {
+                      const filtered = userWallets.filter((uw: any) => 
+                        uw.user.name.toLowerCase().includes(walletSearch.toLowerCase()) ||
+                        uw.user.email.toLowerCase().includes(walletSearch.toLowerCase())
+                      );
+                      
+                      if (filtered.length === 0) {
+                        return (
+                          <tr>
+                            <td colSpan={7} className="px-6 py-8 text-center text-gray-400">Nenhum usuário encontrado.</td>
+                          </tr>
+                        );
+                      }
+
+                      return filtered.map((uw: any) => (
                         <tr key={uw.user.id} className="hover:bg-gray-50 transition-colors">
                           <td className="px-6 py-4">
                             <p className="font-bold text-primary">{uw.user.name}</p>
@@ -3412,31 +3435,21 @@ const AdminDashboard = () => {
                             {uw.user.nickname && <p className="text-xs text-blue-500">@{uw.user.nickname}</p>}
                           </td>
                           <td className="px-6 py-4">
-                            <span className="font-bold text-green-600">R$ {uw.balance.toFixed(2)}</span>
+                            <span className={`font-bold ${uw.balance > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                              R$ {uw.balance.toFixed(2)}
+                            </span>
                           </td>
                           <td className="px-6 py-4 text-gray-600">R$ {uw.totalDeposited.toFixed(2)}</td>
                           <td className="px-6 py-4 text-blue-600">R$ {uw.totalWinnings.toFixed(2)}</td>
                           <td className="px-6 py-4 text-red-500">R$ {uw.totalWithdrawn.toFixed(2)}</td>
                           <td className="px-6 py-4">
-                            {uw.deposits.length === 0 ? (
-                              <span className="text-xs text-gray-400">Sem depósitos</span>
-                            ) : (
-                              <div className="space-y-1 max-h-32 overflow-y-auto pr-2">
-                                {uw.deposits.map((d: any) => (
-                                  <div key={d.id} className="text-xs flex justify-between items-center bg-gray-100 p-2 rounded">
-                                    <span>{formatDate(d.created_at, 'dd/MM/yy')}</span>
-                                    <span className="font-bold">R$ {d.amount.toFixed(2)}</span>
-                                    <span className={`px-2 py-0.5 rounded-full text-[10px] ${
-                                      d.status === 'approved' ? 'bg-green-100 text-green-700' :
-                                      d.status === 'rejected' ? 'bg-red-100 text-red-700' :
-                                      'bg-yellow-100 text-yellow-700'
-                                    }`}>
-                                      {d.status === 'approved' ? 'Aprovado' : d.status === 'rejected' ? 'Rejeitado' : 'Pendente'}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
+                            <button 
+                              onClick={() => setViewingWalletHistory(uw)}
+                              className="flex items-center gap-1 text-xs font-bold text-gray-500 hover:text-primary transition-colors bg-gray-100 px-3 py-1.5 rounded-lg"
+                            >
+                              <History className="w-3.5 h-3.5" />
+                              Ver Extrato ({uw.deposits.length})
+                            </button>
                           </td>
                           <td className="px-6 py-4">
                             <button 
@@ -3451,8 +3464,8 @@ const AdminDashboard = () => {
                             </button>
                           </td>
                         </tr>
-                      ))
-                    )}
+                      ));
+                    })()}
                   </tbody>
                 </table>
               </div>
@@ -3891,6 +3904,94 @@ const AdminDashboard = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Wallet History Modal */}
+      {viewingWalletHistory && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-3xl p-8 max-w-2xl w-full max-h-[90vh] flex flex-col">
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h3 className="text-xl font-bold text-primary flex items-center gap-2">
+                  <History className="w-6 h-6 text-blue-500" />
+                  Extrato de Depósitos
+                </h3>
+                <p className="text-sm text-gray-500">{viewingWalletHistory.user.name} ({viewingWalletHistory.user.email})</p>
+              </div>
+              <button 
+                onClick={() => setViewingWalletHistory(null)}
+                className="p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-grow overflow-y-auto pr-2">
+              {viewingWalletHistory.deposits.length === 0 ? (
+                <div className="py-12 text-center text-gray-400 italic">
+                  Nenhum depósito registrado para este usuário.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {viewingWalletHistory.deposits.map((d: any) => (
+                    <div key={d.id} className="bg-gray-50 p-4 rounded-2xl border border-gray-100 flex justify-between items-center">
+                      <div className="flex items-center gap-4">
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                          d.status === 'approved' ? 'bg-green-100 text-green-600' :
+                          d.status === 'rejected' ? 'bg-red-100 text-red-600' :
+                          'bg-yellow-100 text-yellow-600'
+                        }`}>
+                          {d.status === 'approved' ? <CheckCircle className="w-5 h-5" /> : 
+                           d.status === 'rejected' ? <XCircle className="w-5 h-5" /> : 
+                           <Clock className="w-5 h-5" />}
+                        </div>
+                        <div>
+                          <p className="font-bold text-gray-900">R$ {d.amount.toFixed(2)}</p>
+                          <p className="text-xs text-gray-500">{formatDate(d.created_at, "dd 'de' MMMM 'de' yyyy 'às' HH:mm")}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                          d.status === 'approved' ? 'bg-green-100 text-green-700' :
+                          d.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                          'bg-yellow-100 text-yellow-700'
+                        }`}>
+                          {d.status === 'approved' ? 'Aprovado' : d.status === 'rejected' ? 'Rejeitado' : 'Pendente'}
+                        </span>
+                        {d.proof_url && (
+                          <button 
+                            onClick={() => setViewingProof(d.proof_url)}
+                            className="block mt-2 text-[10px] text-blue-500 hover:underline font-bold"
+                          >
+                            Ver Comprovante
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-8 pt-6 border-t border-gray-100 flex justify-between items-center">
+              <div>
+                <p className="text-xs text-gray-400 uppercase font-bold">Saldo Atual</p>
+                <p className="text-xl font-bold text-green-600">R$ {viewingWalletHistory.balance.toFixed(2)}</p>
+              </div>
+              <button 
+                onClick={() => {
+                  setManualDepositForm({ ...manualDepositForm, userId: viewingWalletHistory.user.id });
+                  setViewingWalletHistory(null);
+                  setShowManualDepositModal(true);
+                }}
+                className="bg-primary text-white px-6 py-2.5 rounded-xl font-bold hover:bg-secondary transition-all shadow-md flex items-center gap-2"
+              >
+                <PlusCircle className="w-5 h-5" />
+                Novo Depósito
+              </button>
+            </div>
           </div>
         </div>
       )}
