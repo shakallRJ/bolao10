@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from 'react';
-import { X, Copy, Check, Upload, AlertCircle, MessageCircle } from 'lucide-react';
+import { X, Copy, Check, Upload, AlertCircle, MessageCircle, CreditCard, ShieldCheck } from 'lucide-react';
 import { generatePixPayload } from '../utils/pix';
 import QRCode from 'react-qr-code';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
+import { PagBankCheckout } from './PagBankCheckout';
 
 export const DepositModal = ({ isOpen, onClose, token, onDepositSuccess }: any) => {
   const { user } = useAuth();
@@ -14,6 +15,19 @@ export const DepositModal = ({ isOpen, onClose, token, onDepositSuccess }: any) 
   const [validating, setValidating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [depositId, setDepositId] = useState<number | null>(null);
+  const [paymentMode, setPaymentMode] = useState<'manual' | 'pagbank' | null>(null);
+
+  React.useEffect(() => {
+    if (!isOpen) {
+      setStep(1);
+      setAmount('');
+      setProofFile(null);
+      setDepositId(null);
+      setError(null);
+      setPaymentMode(null);
+    }
+  }, [isOpen]);
 
   const pixPayload = useMemo(() => {
     const numAmount = parseFloat(amount);
@@ -32,41 +46,74 @@ export const DepositModal = ({ isOpen, onClose, token, onDepositSuccess }: any) 
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
       setError('Digite um valor válido maior que zero.');
       return;
     }
+    
+    setLoading(true);
     setError(null);
-    setStep(2);
+    try {
+      const endpoint = depositId ? `/api/wallet/deposit/update-amount` : '/api/wallet/deposit/initiate';
+      const body = depositId ? { depositId, amount: numAmount } : { amount: numAmount };
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao processar depósito');
+
+      if (!depositId) setDepositId(data.deposit.id);
+      setStep(2);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSubmit = async () => {
+    if (!proofFile) {
+      // If no proof file, we just close because the deposit was already initiated
+      onDepositSuccess();
+      onClose();
+      setStep(1);
+      setAmount('');
+      setDepositId(null);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
     const formData = new FormData();
-    formData.append('amount', amount);
-    if (proofFile) {
-      formData.append('proof', proofFile);
-    }
+    formData.append('depositId', depositId?.toString() || '');
+    formData.append('proof', proofFile);
 
     try {
-      const res = await fetch('/api/wallet/deposit', {
+      const res = await fetch('/api/wallet/deposit/attach-proof', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Erro ao registrar depósito');
+      if (!res.ok) throw new Error(data.error || 'Erro ao anexar comprovante');
 
       onDepositSuccess();
       onClose();
       setStep(1);
       setAmount('');
       setProofFile(null);
+      setDepositId(null);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -94,7 +141,7 @@ export const DepositModal = ({ isOpen, onClose, token, onDepositSuccess }: any) 
             </div>
           )}
 
-          {step === 1 && (
+          {!paymentMode && step === 1 && (
             <div className="space-y-6">
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">Valor do Depósito (R$)</label>
@@ -121,16 +168,72 @@ export const DepositModal = ({ isOpen, onClose, token, onDepositSuccess }: any) 
                 ))}
               </div>
 
+              <div className="space-y-3 pt-4">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider text-center">Escolha o método de pagamento</p>
+                <button
+                  onClick={() => {
+                    if (parseFloat(amount) > 0) setPaymentMode('pagbank');
+                    else setError('Digite um valor válido.');
+                  }}
+                  className="w-full bg-primary text-white font-bold py-4 rounded-xl hover:bg-secondary transition-all flex items-center justify-center gap-2 shadow-lg"
+                >
+                  <CreditCard className="w-5 h-5" />
+                  PagBank (PIX ou Cartão)
+                </button>
+                <button
+                  onClick={() => {
+                    if (parseFloat(amount) > 0) setPaymentMode('manual');
+                    else setError('Digite um valor válido.');
+                  }}
+                  className="w-full bg-gray-100 text-gray-700 font-bold py-4 rounded-xl hover:bg-gray-200 transition-all flex items-center justify-center gap-2"
+                >
+                  <MessageCircle className="w-5 h-5" />
+                  Depósito Manual (PIX Direto)
+                </button>
+              </div>
+              
+              <div className="flex items-center justify-center gap-2 pt-4 opacity-50">
+                <ShieldCheck className="w-4 h-4 text-green-600" />
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Pagamento 100% Seguro</span>
+              </div>
+            </div>
+          )}
+
+          {paymentMode === 'pagbank' && (
+            <div className="flex justify-center">
+              <PagBankCheckout 
+                amount={amount} 
+                token={token} 
+                onSuccess={() => {
+                  onDepositSuccess();
+                  onClose();
+                }}
+                onCancel={() => setPaymentMode(null)}
+              />
+            </div>
+          )}
+
+          {paymentMode === 'manual' && step === 1 && (
+            <div className="space-y-6">
+              <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 mb-4">
+                <p className="text-sm text-blue-800 font-medium">Você escolheu o depósito manual de <span className="font-bold text-blue-900">R$ {parseFloat(amount).toFixed(2)}</span>. Clique em continuar para gerar os dados.</p>
+              </div>
               <button
                 onClick={handleNext}
                 className="w-full bg-primary text-white font-bold py-4 rounded-xl hover:bg-primary/90 transition-colors"
               >
                 Continuar
               </button>
+              <button
+                onClick={() => setPaymentMode(null)}
+                className="w-full text-gray-400 font-medium hover:text-gray-600 transition-colors"
+              >
+                Voltar
+              </button>
             </div>
           )}
 
-          {step === 2 && (
+          {paymentMode === 'manual' && step === 2 && (
             <div className="space-y-6">
               <div className="text-center">
                 <p className="text-gray-600 mb-4">Escaneie o QR Code ou copie a chave PIX para depositar <span className="font-bold text-primary">R$ {parseFloat(amount).toFixed(2)}</span></p>

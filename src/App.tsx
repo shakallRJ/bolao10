@@ -55,6 +55,7 @@ import { Download } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { generatePixPayload } from './utils/pix';
 import { DepositModal } from './components/DepositModal';
+import { PagBankCheckout } from './components/PagBankCheckout';
 import { PromoPopup } from './components/PromoPopup';
 import { Toaster, toast } from 'sonner';
 
@@ -2661,7 +2662,7 @@ const AdminDashboard = () => {
     const handleNewNotification = (e: any) => {
       const notif = e.detail;
       if (notif && notif.id) {
-        if (notif.id.startsWith('dep-req-') && activeTab === 'user-wallets') fetchPendingDeposits();
+        if ((notif.id.startsWith('dep-req-') || notif.id.startsWith('dep-proof-') || notif.id.startsWith('dep-upd-')) && activeTab === 'user-wallets') fetchPendingDeposits();
         if (notif.id.startsWith('withdraw-req-') && activeTab === 'withdrawals') fetchPendingWithdrawals();
       }
     };

@@ -1010,7 +1010,197 @@ app.post('/api/wallet/withdraw', authenticate, async (req: any, res) => {
   }
 });
 
-app.post('/api/wallet/deposit', authenticate, upload.single('proof'), async (req: any, res) => {
+// PagBank Integration
+const PAGBANK_TOKEN = process.env.PAGBANK_TOKEN;
+const PAGBANK_EMAIL = process.env.PAGBANK_EMAIL;
+const PAGBANK_API_HOST = process.env.PAGBANK_API_HOST || 'https://api.pagseguro.com';
+
+app.post('/api/pagbank/create-payment', authenticate, async (req: any, res) => {
+  try {
+    if (!PAGBANK_TOKEN) {
+      throw new Error('Configuração do PagBank ausente (Token não encontrado). Verifique as variáveis de ambiente.');
+    }
+
+    const { amount, method, cardHash } = req.body;
+    const depositAmount = parseFloat(amount);
+
+    if (isNaN(depositAmount) || depositAmount <= 0) {
+      return res.status(400).json({ error: 'Valor inválido' });
+    }
+
+    // 1. Create record in deposits table
+    const { data: deposit, error: depErr } = await supabase
+      .from('deposits')
+      .insert([{
+        user_id: req.user.id,
+        amount: depositAmount,
+        status: 'pending',
+        payment_method: method // pix or credit_card
+      }])
+      .select()
+      .single();
+
+    if (depErr) throw depErr;
+
+    // 2. Prepare PagBank Request
+    const appUrl = process.env.APP_URL || `https://${req.get('host')}`;
+    const orderData: any = {
+      reference_id: `DEP-${deposit.id}`,
+      customer: {
+        name: req.user.name,
+        email: req.user.email,
+        tax_id: '12345678909', // Dummy CPF for example, should be collected from user
+        phones: [{ country: '55', area: '21', number: '999999999', type: 'MOBILE' }]
+      },
+      items: [{
+        name: 'Depósito Bolão10',
+        quantity: 1,
+        unit_amount: Math.round(depositAmount * 100)
+      }],
+      notification_urls: [`${appUrl}/api/pagbank/webhook`]
+    };
+
+    if (method === 'pix') {
+      orderData.qr_codes = [{ amount: { value: Math.round(depositAmount * 100) } }];
+    } else if (method === 'credit_card' && cardHash) {
+      orderData.charges = [{
+        reference_id: `CHG-${deposit.id}`,
+        description: 'Depósito Bolão10',
+        amount: { value: Math.round(depositAmount * 100), currency: 'BRL' },
+        payment_method: {
+          type: 'CREDIT_CARD',
+          installments: 1,
+          capture: true,
+          card: { encrypted: cardHash }
+        }
+      }];
+    }
+
+    const pbRes = await fetch(`${PAGBANK_API_HOST}/orders`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${PAGBANK_TOKEN}`,
+        'Content-Type': 'application/json',
+        'accept': 'application/json'
+      },
+      body: JSON.stringify(orderData)
+    });
+
+    const pbData = await pbRes.json();
+    if (!pbRes.ok) {
+      console.error('PagBank API Error Details:', JSON.stringify(pbData, null, 2));
+      const errorMsg = pbData.error_messages?.[0]?.description || 'Erro na comunicação com PagBank';
+      throw new Error(errorMsg);
+    }
+
+    // 3. Update deposit with PagBank ID
+    await supabase
+      .from('deposits')
+      .update({ pagbank_id: pbData.id })
+      .eq('id', deposit.id);
+
+    // 4. Return necessary data to frontend
+    if (method === 'pix') {
+      const qrCode = pbData.qr_codes[0];
+      res.json({
+        success: true,
+        depositId: deposit.id,
+        pix: {
+          qrcode: qrCode.links.find((l: any) => l.rel === 'QRCODE.PNG')?.href,
+          text: qrCode.text
+        }
+      });
+    } else {
+      res.json({
+        success: true,
+        depositId: deposit.id,
+        status: pbData.charges?.[0]?.status
+      });
+    }
+
+  } catch (err: any) {
+    console.error('Create PagBank payment error:', err.message || err);
+    res.status(500).json({ error: err.message || 'Erro interno ao processar pagamento' });
+  }
+});
+
+app.post('/api/pagbank/webhook', async (req, res) => {
+  try {
+    const notification = req.body;
+    // Basic security: check if it's a valid PagBank notification structure
+    if (!notification.id || !notification.reference_id) {
+      return res.status(400).send('Invalid notification');
+    }
+
+    const pagbankId = notification.id;
+    const status = notification.status; // PAID, DECLINED, etc.
+
+    if (status === 'PAID') {
+      // 1. Find deposit
+      const { data: deposit, error: depErr } = await supabase
+        .from('deposits')
+        .select('*')
+        .eq('pagbank_id', pagbankId)
+        .single();
+
+      if (depErr || !deposit) {
+        console.error('Deposit not found for PagBank ID:', pagbankId);
+        return res.status(404).send('Deposit not found');
+      }
+
+      if (deposit.status === 'approved') {
+        return res.json({ success: true, message: 'Already processed' });
+      }
+
+      // 2. Update deposit status
+      await supabase
+        .from('deposits')
+        .update({ status: 'approved' })
+        .eq('id', deposit.id);
+
+      // 3. Update wallet balance
+      const { data: wallet } = await supabase
+        .from('wallets')
+        .select('balance')
+        .eq('user_id', deposit.user_id)
+        .single();
+
+      if (wallet) {
+        const newBalance = parseFloat(wallet.balance) + parseFloat(deposit.amount);
+        await supabase
+          .from('wallets')
+          .update({ balance: newBalance })
+          .eq('user_id', deposit.user_id);
+
+        // 4. Record transaction
+        await supabase.from('transactions').insert([{
+          user_id: deposit.user_id,
+          wallet_id: deposit.user_id, // Assuming wallet_id is user_id
+          type: 'deposit',
+          amount: deposit.amount,
+          description: `Depósito via PagBank (${deposit.payment_method})`,
+          status: 'completed'
+        }]);
+
+        // 5. Notify user
+        sendRealtimeNotification(deposit.user_id, {
+          id: `dep-paid-${deposit.id}`,
+          type: 'deposit_confirmed',
+          title: '✅ Depósito Confirmado',
+          message: `Seu depósito de R$ ${parseFloat(deposit.amount).toFixed(2)} foi confirmado via PagBank!`,
+          amount: deposit.amount
+        });
+      }
+    }
+
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('PagBank Webhook error:', err);
+    res.status(500).send('Internal Error');
+  }
+});
+
+app.post('/api/wallet/deposit/initiate', authenticate, async (req: any, res) => {
   try {
     const { amount } = req.body;
     const depositAmount = parseFloat(amount);
@@ -1019,14 +1209,11 @@ app.post('/api/wallet/deposit', authenticate, upload.single('proof'), async (req
       return res.status(400).json({ error: 'Valor de depósito inválido' });
     }
 
-    const proofPath = req.file ? `/uploads/${req.file.filename}` : null;
-
     const { data, error } = await supabase
       .from('deposits')
       .insert([{
         user_id: req.user.id,
         amount: depositAmount,
-        proof_url: proofPath,
         status: 'pending'
       }])
       .select()
@@ -1036,6 +1223,7 @@ app.post('/api/wallet/deposit', authenticate, upload.single('proof'), async (req
 
     // Notify Admins
     await addAdminNotification({
+      id: `dep-req-${data.id}`,
       type: 'deposit_request',
       user_id: req.user.id,
       user_name: req.user.name,
@@ -1043,15 +1231,92 @@ app.post('/api/wallet/deposit', authenticate, upload.single('proof'), async (req
       user_email: req.user.email,
       user_phone: req.user.phone,
       amount: depositAmount,
-      title: '💰 Novo Depósito Pendente',
+      title: '💰 Novo Depósito Iniciado',
       msgType: 'info',
-      message: `${req.user.name} solicitou um depósito de R$ ${depositAmount.toFixed(2)}${req.file ? ' (com comprovante)' : ' (sem comprovante)'}.`
+      message: `${req.user.name} iniciou um depósito de R$ ${depositAmount.toFixed(2)}. Aguardando comprovante.`
     });
 
     res.json({ success: true, deposit: data });
   } catch (err: any) {
-    console.error('Deposit error:', err);
-    res.status(500).json({ error: err.message || 'Erro ao registrar depósito' });
+    console.error('Deposit initiation error:', err);
+    res.status(500).json({ error: err.message || 'Erro ao iniciar depósito' });
+  }
+});
+
+app.post('/api/wallet/deposit/update-amount', authenticate, async (req: any, res) => {
+  try {
+    const { depositId, amount } = req.body;
+    const depositAmount = parseFloat(amount);
+
+    if (!depositId) return res.status(400).json({ error: 'ID do depósito é obrigatório' });
+    if (isNaN(depositAmount) || depositAmount <= 0) {
+      return res.status(400).json({ error: 'Valor de depósito inválido' });
+    }
+
+    const { error } = await supabase
+      .from('deposits')
+      .update({ amount: depositAmount })
+      .eq('id', depositId)
+      .eq('user_id', req.user.id);
+
+    if (error) throw error;
+
+    // Update Admin Notification
+    await addAdminNotification({
+      id: `dep-upd-${depositId}`,
+      type: 'deposit_update',
+      user_id: req.user.id,
+      user_name: req.user.name,
+      user_nickname: req.user.nickname,
+      user_email: req.user.email,
+      user_phone: req.user.phone,
+      amount: depositAmount,
+      title: '💰 Valor de Depósito Atualizado',
+      msgType: 'info',
+      message: `${req.user.name} alterou o valor do depósito #${depositId} para R$ ${depositAmount.toFixed(2)}.`
+    });
+
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Deposit update error:', err);
+    res.status(500).json({ error: err.message || 'Erro ao atualizar valor do depósito' });
+  }
+});
+
+app.post('/api/wallet/deposit/attach-proof', authenticate, upload.single('proof'), async (req: any, res) => {
+  try {
+    const { depositId } = req.body;
+    if (!depositId) return res.status(400).json({ error: 'ID do depósito é obrigatório' });
+    if (!req.file) return res.status(400).json({ error: 'Comprovante é obrigatório' });
+
+    const proofPath = `/uploads/${req.file.filename}`;
+
+    const { error } = await supabase
+      .from('deposits')
+      .update({ proof_url: proofPath })
+      .eq('id', depositId)
+      .eq('user_id', req.user.id);
+
+    if (error) throw error;
+
+    // Update Admin Notification
+    await addAdminNotification({
+      id: `dep-proof-${depositId}`,
+      type: 'deposit_proof',
+      user_id: req.user.id,
+      user_name: req.user.name,
+      user_nickname: req.user.nickname,
+      user_email: req.user.email,
+      user_phone: req.user.phone,
+      title: '📄 Comprovante Enviado',
+      msgType: 'info',
+      message: `${req.user.name} enviou o comprovante para o depósito #${depositId}.`
+    });
+
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Attach proof error:', err);
+    res.status(500).json({ error: err.message || 'Erro ao anexar comprovante' });
   }
 });
 
