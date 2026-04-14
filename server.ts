@@ -1011,9 +1011,41 @@ app.post('/api/wallet/withdraw', authenticate, async (req: any, res) => {
 });
 
 // PagBank Integration
-const PAGBANK_TOKEN = process.env.PAGBANK_TOKEN;
-const PAGBANK_EMAIL = process.env.PAGBANK_EMAIL;
-const PAGBANK_API_HOST = process.env.PAGBANK_API_HOST || 'https://api.pagseguro.com';
+const PAGBANK_TOKEN = process.env.PAGBANK_TOKEN?.trim();
+const PAGBANK_APP_KEY = process.env.PAGBANK_APP_KEY?.trim();
+const PAGBANK_EMAIL = process.env.PAGBANK_EMAIL?.trim();
+// Ensure no trailing slash in host
+const PAGBANK_API_HOST = (process.env.PAGBANK_API_HOST || 'https://api.pagseguro.com').replace(/\/$/, '');
+
+app.get('/api/pagbank/public-key', authenticate, async (req: any, res) => {
+  try {
+    if (!PAGBANK_TOKEN) throw new Error('Token PagBank não configurado');
+    const cleanToken = PAGBANK_TOKEN.replace(/^Bearer\s+/i, '').trim();
+    
+    const headers: any = {
+      'Authorization': `Bearer ${cleanToken}`,
+      'Content-Type': 'application/json',
+      'accept': 'application/json'
+    };
+    if (PAGBANK_APP_KEY) headers['x-pagseguro-app-key'] = PAGBANK_APP_KEY;
+
+    const pbRes = await fetch(`${PAGBANK_API_HOST}/public-keys`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ type: 'card' })
+    });
+
+    if (!pbRes.ok) {
+      const errText = await pbRes.text();
+      throw new Error(`Erro ao obter chave pública: ${errText}`);
+    }
+
+    const data = await pbRes.json();
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.post('/api/pagbank/create-payment', authenticate, async (req: any, res) => {
   try {
@@ -1021,6 +1053,9 @@ app.post('/api/pagbank/create-payment', authenticate, async (req: any, res) => {
       throw new Error('Configuração do PagBank ausente (Token não encontrado). Verifique as variáveis de ambiente.');
     }
 
+    // Sanitize token: remove "Bearer " if the user included it in the env var
+    const cleanToken = PAGBANK_TOKEN.replace(/^Bearer\s+/i, '').trim();
+    
     const { amount, method, cardHash } = req.body;
     const depositAmount = parseFloat(amount);
 
@@ -1062,7 +1097,11 @@ app.post('/api/pagbank/create-payment', authenticate, async (req: any, res) => {
 
     if (method === 'pix') {
       orderData.qr_codes = [{ amount: { value: Math.round(depositAmount * 100) } }];
-    } else if (method === 'credit_card' && cardHash) {
+    } else if (method === 'credit_card') {
+      if (!cardHash) {
+        throw new Error('Hash do cartão ausente.');
+      }
+
       orderData.charges = [{
         reference_id: `CHG-${deposit.id}`,
         description: 'Depósito Bolão10',
@@ -1076,17 +1115,42 @@ app.post('/api/pagbank/create-payment', authenticate, async (req: any, res) => {
       }];
     }
 
-    const pbRes = await fetch(`${PAGBANK_API_HOST}/orders`, {
+    // PagBank Orders API usually expects "Bearer <TOKEN>"
+    const headers: any = {
+      'Authorization': `Bearer ${cleanToken}`, 
+      'Content-Type': 'application/json',
+      'accept': 'application/json'
+    };
+
+    // Include App Key if provided
+    if (PAGBANK_APP_KEY) {
+      headers['x-pagseguro-app-key'] = PAGBANK_APP_KEY;
+    }
+
+    const maskedToken = `${cleanToken.substring(0, 4)}...${cleanToken.substring(cleanToken.length - 4)}`;
+    const isSandbox = PAGBANK_API_HOST.includes('sandbox');
+    const apiUrl = `${PAGBANK_API_HOST}/orders`;
+    
+    console.log(`[PagBank ${isSandbox ? 'SANDBOX' : 'PRODUCTION'}] Enviando requisição para: ${apiUrl}`);
+    console.log(`Auth Masked: Bearer ${maskedToken}`);
+    
+    const pbRes = await fetch(apiUrl, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${PAGBANK_TOKEN}`,
-        'Content-Type': 'application/json',
-        'accept': 'application/json'
-      },
+      headers,
       body: JSON.stringify(orderData)
     });
 
-    const pbData = await pbRes.json();
+    const contentType = pbRes.headers.get('content-type');
+    let pbData: any;
+
+    if (contentType && contentType.includes('application/json')) {
+      pbData = await pbRes.json();
+    } else {
+      const textError = await pbRes.text();
+      console.error(`PagBank Non-JSON Response (${pbRes.status}):`, textError);
+      throw new Error(`Erro na API do PagBank (${pbRes.status}): ${textError.substring(0, 100)}`);
+    }
+
     if (!pbRes.ok) {
       console.error('PagBank API Error Details:', JSON.stringify(pbData, null, 2));
       const errorMsg = pbData.error_messages?.[0]?.description || 'Erro na comunicação com PagBank';
@@ -1111,10 +1175,23 @@ app.post('/api/pagbank/create-payment', authenticate, async (req: any, res) => {
         }
       });
     } else {
+      // Check if credit card was approved immediately
+      const charge = pbData.charges?.[0];
+      const status = charge?.status?.toUpperCase();
+      
+      if (status === 'PAID' || status === 'AUTHORIZED' || status === 'CONFIRMED') {
+        await approveDeposit({ ...deposit, pagbank_id: pbData.id });
+        return res.json({
+          success: true,
+          depositId: deposit.id,
+          status: 'PAID'
+        });
+      }
+
       res.json({
         success: true,
         depositId: deposit.id,
-        status: pbData.charges?.[0]?.status
+        status: status || 'PENDING'
       });
     }
 
@@ -1124,79 +1201,191 @@ app.post('/api/pagbank/create-payment', authenticate, async (req: any, res) => {
   }
 });
 
+// Shared function to approve a deposit and update wallet
+async function approveDeposit(deposit: any) {
+  if (deposit.status === 'approved') return false;
+
+  // 1. Update deposit status
+  const { error: updateErr } = await supabase
+    .from('deposits')
+    .update({ status: 'approved' })
+    .eq('id', deposit.id);
+  
+  if (updateErr) throw updateErr;
+
+  // 2. Update wallet balance
+  const { data: wallet } = await supabase
+    .from('wallets')
+    .select('id, balance')
+    .eq('user_id', deposit.user_id)
+    .single();
+
+  if (wallet) {
+    const newBalance = parseFloat(wallet.balance) + parseFloat(deposit.amount);
+    await supabase
+      .from('wallets')
+      .update({ balance: newBalance })
+      .eq('user_id', deposit.user_id);
+
+    // 3. Record transaction
+    try {
+      await supabase.from('transactions').insert([{
+        user_id: deposit.user_id,
+        wallet_id: wallet.id,
+        type: 'deposit',
+        amount: deposit.amount,
+        description: `Depósito via PagBank (${deposit.payment_method || 'PIX'})`,
+        status: 'completed'
+      }]);
+    } catch (tErr) {
+      console.error('Error recording transaction:', tErr);
+    }
+
+    // 4. Notify user
+    sendRealtimeNotification(deposit.user_id, {
+      id: `dep-paid-${deposit.id}`,
+      type: 'deposit_confirmed',
+      title: '✅ Depósito Confirmado',
+      message: `Seu depósito de R$ ${parseFloat(deposit.amount).toFixed(2)} foi confirmado via PagBank!`,
+      amount: deposit.amount
+    });
+    
+    console.log(`Deposit ${deposit.id} approved and wallet updated for user ${deposit.user_id}`);
+    return true;
+  }
+  return false;
+}
+
 app.post('/api/pagbank/webhook', async (req, res) => {
   try {
     const notification = req.body;
-    // Basic security: check if it's a valid PagBank notification structure
-    if (!notification.id || !notification.reference_id) {
-      return res.status(400).send('Invalid notification');
-    }
+    console.log('PagBank Webhook Received:', JSON.stringify(notification, null, 2));
 
-    const pagbankId = notification.id;
-    const status = notification.status; // PAID, DECLINED, etc.
+    // PagBank can send notifications for Orders or Charges
+    // We store the Order ID (ORDE_...) in pagbank_id
+    const orderId = notification.id || notification.order_id;
+    const charge = notification.charges?.[0] || notification.charge;
+    const status = (charge?.status || notification.status || '').toUpperCase();
+    const referenceId = notification.reference_id || charge?.reference_id;
 
-    if (status === 'PAID') {
+    if (status === 'PAID' || status === 'AUTHORIZED' || status === 'CONFIRMED') {
       // 1. Find deposit
-      const { data: deposit, error: depErr } = await supabase
-        .from('deposits')
-        .select('*')
-        .eq('pagbank_id', pagbankId)
-        .single();
+      let query = supabase.from('deposits').select('*');
+      
+      const filters = [];
+      if (referenceId && referenceId.startsWith('DEP-')) {
+        filters.push(`id.eq.${referenceId.replace('DEP-', '')}`);
+      }
+      if (orderId) filters.push(`pagbank_id.eq.${orderId}`);
+      if (charge?.id) filters.push(`pagbank_id.eq.${charge.id}`);
+
+      if (filters.length === 0) {
+        console.error('No identifiers found in PagBank notification');
+        return res.status(400).send('No identifiers found');
+      }
+
+      const { data: deposit, error: depErr } = await query.or(filters.join(',')).maybeSingle();
 
       if (depErr || !deposit) {
-        console.error('Deposit not found for PagBank ID:', pagbankId);
+        console.error('Deposit not found for PagBank notification:', { orderId, referenceId });
         return res.status(404).send('Deposit not found');
       }
 
-      if (deposit.status === 'approved') {
-        return res.json({ success: true, message: 'Already processed' });
-      }
-
-      // 2. Update deposit status
-      await supabase
-        .from('deposits')
-        .update({ status: 'approved' })
-        .eq('id', deposit.id);
-
-      // 3. Update wallet balance
-      const { data: wallet } = await supabase
-        .from('wallets')
-        .select('balance')
-        .eq('user_id', deposit.user_id)
-        .single();
-
-      if (wallet) {
-        const newBalance = parseFloat(wallet.balance) + parseFloat(deposit.amount);
-        await supabase
-          .from('wallets')
-          .update({ balance: newBalance })
-          .eq('user_id', deposit.user_id);
-
-        // 4. Record transaction
-        await supabase.from('transactions').insert([{
-          user_id: deposit.user_id,
-          wallet_id: deposit.user_id, // Assuming wallet_id is user_id
-          type: 'deposit',
-          amount: deposit.amount,
-          description: `Depósito via PagBank (${deposit.payment_method})`,
-          status: 'completed'
-        }]);
-
-        // 5. Notify user
-        sendRealtimeNotification(deposit.user_id, {
-          id: `dep-paid-${deposit.id}`,
-          type: 'deposit_confirmed',
-          title: '✅ Depósito Confirmado',
-          message: `Seu depósito de R$ ${parseFloat(deposit.amount).toFixed(2)} foi confirmado via PagBank!`,
-          amount: deposit.amount
-        });
-      }
+      await approveDeposit(deposit);
     }
 
     res.json({ success: true });
   } catch (err: any) {
     console.error('PagBank Webhook error:', err);
     res.status(500).send('Internal Error');
+  }
+});
+
+// Manual status check endpoint
+app.get('/api/pagbank/check-status/:depositId', authenticate, async (req: any, res) => {
+  try {
+    const { depositId } = req.params;
+    
+    const { data: deposit, error: depErr } = await supabase
+      .from('deposits')
+      .select('*')
+      .eq('id', depositId)
+      .eq('user_id', req.user.id)
+      .single();
+
+    if (depErr || !deposit) return res.status(404).json({ error: 'Depósito não encontrado' });
+    if (deposit.status === 'approved') return res.json({ status: 'PAID', alreadyApproved: true });
+    if (!deposit.pagbank_id) return res.json({ status: 'PENDING', message: 'Aguardando processamento do banco' });
+
+    const cleanToken = PAGBANK_TOKEN?.replace(/^Bearer\s+/i, '').trim();
+    const headers: any = {
+      'Authorization': `Bearer ${cleanToken}`,
+      'accept': 'application/json'
+    };
+    if (PAGBANK_APP_KEY) headers['x-pagseguro-app-key'] = PAGBANK_APP_KEY;
+
+    const pbRes = await fetch(`${PAGBANK_API_HOST}/orders/${deposit.pagbank_id}`, { headers });
+    if (!pbRes.ok) throw new Error('Erro ao consultar status no PagBank');
+
+    const pbData = await pbRes.json();
+    const charge = pbData.charges?.[0];
+    const status = (charge?.status || pbData.status || '').toUpperCase();
+
+    if (status === 'PAID' || status === 'AUTHORIZED' || status === 'CONFIRMED') {
+      const updated = await approveDeposit(deposit);
+      return res.json({ status: 'PAID', updated });
+    }
+
+    res.json({ status: 'PENDING', pbStatus: status });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Sync all pending PagBank deposits for user
+app.post('/api/pagbank/sync-pending', authenticate, async (req: any, res) => {
+  try {
+    const { data: pendingDeposits } = await supabase
+      .from('deposits')
+      .select('*')
+      .eq('user_id', req.user.id)
+      .eq('status', 'pending')
+      .not('pagbank_id', 'is', null);
+
+    if (!pendingDeposits || pendingDeposits.length === 0) {
+      return res.json({ success: true, checked: 0, updated: 0 });
+    }
+
+    const cleanToken = PAGBANK_TOKEN?.replace(/^Bearer\s+/i, '').trim();
+    const headers: any = {
+      'Authorization': `Bearer ${cleanToken}`,
+      'accept': 'application/json'
+    };
+    if (PAGBANK_APP_KEY) headers['x-pagseguro-app-key'] = PAGBANK_APP_KEY;
+
+    let updatedCount = 0;
+
+    for (const deposit of pendingDeposits) {
+      try {
+        const pbRes = await fetch(`${PAGBANK_API_HOST}/orders/${deposit.pagbank_id}`, { headers });
+        if (!pbRes.ok) continue;
+
+        const pbData = await pbRes.json();
+        const charge = pbData.charges?.[0];
+        const status = (charge?.status || pbData.status || '').toUpperCase();
+
+        if (status === 'PAID' || status === 'AUTHORIZED' || status === 'CONFIRMED') {
+          const ok = await approveDeposit(deposit);
+          if (ok) updatedCount++;
+        }
+      } catch (e) {
+        console.error(`Error syncing deposit ${deposit.id}:`, e);
+      }
+    }
+
+    res.json({ success: true, checked: pendingDeposits.length, updated: updatedCount });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 

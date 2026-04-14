@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { CreditCard, QrCode, CheckCircle, AlertCircle, Loader2, Copy, Check } from 'lucide-react';
 import { toast } from 'sonner';
 
+declare const PagSeguro: any;
+
 interface PagBankCheckoutProps {
   amount: string;
   token: string;
@@ -12,7 +14,7 @@ interface PagBankCheckoutProps {
 export const PagBankCheckout: React.FC<PagBankCheckoutProps> = ({ amount, token, onSuccess, onCancel }) => {
   const [method, setMethod] = useState<'pix' | 'credit_card'>('pix');
   const [loading, setLoading] = useState(false);
-  const [pixData, setPixData] = useState<{ qrcode: string; text: string } | null>(null);
+  const [pixData, setPixData] = useState<{ qrcode: string; text: string; depositId: string } | null>(null);
   const [cardData, setCardData] = useState({
     number: '',
     name: '',
@@ -26,9 +28,45 @@ export const PagBankCheckout: React.FC<PagBankCheckoutProps> = ({ amount, token,
     setLoading(true);
 
     try {
-      // In a real scenario, you'd use PagBank's JS SDK to encrypt the card
-      // Here we simulate the cardHash for the example
-      const cardHash = method === 'credit_card' ? 'simulated_encrypted_card_hash' : null;
+      let cardHash = null;
+
+      if (method === 'credit_card') {
+        // 1. Get Public Key from our backend
+        const pkRes = await fetch('/api/pagbank/public-key', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!pkRes.ok) throw new Error('Falha ao obter chave de criptografia');
+        const pkData = await pkRes.json();
+        const publicKey = pkData.public_key;
+
+        // 2. Encrypt card using PagBank SDK
+        if (typeof PagSeguro === 'undefined') {
+          throw new Error('SDK do PagBank não carregado. Verifique sua conexão.');
+        }
+
+        const card = PagSeguro.encryptCard({
+          publicKey,
+          holder: cardData.name,
+          number: cardData.number.replace(/\s/g, ''),
+          expMonth: cardData.expiry.split('/')[0],
+          expYear: '20' + cardData.expiry.split('/')[1],
+          securityCode: cardData.cvv
+        });
+
+        if (card.hasErrors) {
+          const errorMap: any = {
+            'INVALID_NUMBER': 'Número do cartão inválido',
+            'INVALID_HOLDER': 'Nome do titular inválido',
+            'INVALID_EXPIRATION_MONTH': 'Mês de expiração inválido',
+            'INVALID_EXPIRATION_YEAR': 'Ano de expiração inválido',
+            'INVALID_SECURITY_CODE': 'CVV inválido'
+          };
+          const firstError = Object.keys(card.errors)[0];
+          throw new Error(errorMap[firstError] || 'Dados do cartão inválidos');
+        }
+
+        cardHash = card.encryptedCard;
+      }
 
       const res = await fetch('/api/pagbank/create-payment', {
         method: 'POST',
@@ -48,11 +86,21 @@ export const PagBankCheckout: React.FC<PagBankCheckoutProps> = ({ amount, token,
       if (!res.ok) throw new Error(data.error || 'Erro ao processar pagamento');
 
       if (method === 'pix') {
-        setPixData(data.pix);
+        setPixData({ ...data.pix, depositId: data.depositId });
         toast.success('QR Code PIX gerado com sucesso!');
       } else {
-        toast.success('Pagamento com cartão processado!');
-        onSuccess();
+        if (data.status === 'PAID') {
+          toast.success('Pagamento com cartão aprovado!');
+          onSuccess();
+        } else if (data.status === 'IN_ANALYSIS') {
+          toast.info('Pagamento em análise. O saldo será creditado em breve.');
+          onSuccess();
+        } else if (data.status === 'DECLINED') {
+          toast.error('Pagamento recusado pelo cartão.');
+        } else {
+          toast.success('Pagamento com cartão processado!');
+          onSuccess();
+        }
       }
     } catch (err: any) {
       toast.error(err.message);
@@ -97,10 +145,29 @@ export const PagBankCheckout: React.FC<PagBankCheckoutProps> = ({ amount, token,
 
         <div className="pt-4 space-y-3">
           <button 
-            onClick={onSuccess}
-            className="w-full bg-primary text-white font-bold py-4 rounded-xl hover:bg-secondary transition-all shadow-lg"
+            onClick={async () => {
+              try {
+                setLoading(true);
+                const res = await fetch(`/api/pagbank/check-status/${pixData.depositId || ''}`, {
+                  headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await res.json();
+                if (data.status === 'PAID') {
+                  toast.success('Pagamento confirmado!');
+                  onSuccess();
+                } else {
+                  toast.info('Pagamento ainda não detectado. Se você já pagou, aguarde alguns instantes.');
+                }
+              } catch (e) {
+                toast.error('Erro ao verificar status');
+              } finally {
+                setLoading(false);
+              }
+            }}
+            disabled={loading}
+            className="w-full bg-primary text-white font-bold py-4 rounded-xl hover:bg-secondary transition-all shadow-lg flex items-center justify-center gap-2"
           >
-            Já realizei o pagamento
+            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Já realizei o pagamento'}
           </button>
           <button 
             onClick={onCancel}
@@ -225,7 +292,7 @@ export const PagBankCheckout: React.FC<PagBankCheckoutProps> = ({ amount, token,
       </form>
 
       <div className="mt-8 pt-6 border-t border-gray-100 flex items-center justify-center gap-2 grayscale opacity-50">
-        <img src="https://logodownload.org/wp-content/uploads/2014/10/pagseguro-logo-1.png" alt="PagSeguro" className="h-4" referrerPolicy="no-referrer" />
+        <img src="https://zxnsubmxqoplohcngntu.supabase.co/storage/v1/object/public/imagem/PagBank.jpg" alt="PagBank" className="h-4" referrerPolicy="no-referrer" />
         <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Ambiente Seguro</span>
       </div>
     </div>

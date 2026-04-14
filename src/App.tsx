@@ -494,6 +494,18 @@ const LandingPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => 
             </motion.div>
           ))}
         </div>
+        
+        <div className="mt-32 pt-12 border-t border-gray-100 flex flex-col items-center gap-6">
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-[0.2em]">Parceiro Oficial de Pagamentos</p>
+          <div className="flex items-center gap-6 grayscale opacity-60 hover:grayscale-0 hover:opacity-100 transition-all duration-500">
+            <img src="https://zxnsubmxqoplohcngntu.supabase.co/storage/v1/object/public/imagem/PagBank.jpg" alt="PagBank" className="h-8" referrerPolicy="no-referrer" />
+            <div className="h-10 w-[1px] bg-gray-200"></div>
+            <div className="flex flex-col">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest leading-none">Ambiente</span>
+              <span className="text-sm font-bold text-green-600 uppercase tracking-wider">100% Seguro</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -706,13 +718,19 @@ const LoginPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
           </button>
         </form>
 
-        <div className="mt-8 text-center">
+        <div className="mt-8 text-center space-y-6">
           <button 
             onClick={() => setIsRegister(!isRegister)}
             className="text-sm text-gray-500 hover:text-secondary transition-colors"
           >
             {isRegister ? 'Já tem uma conta? Entre aqui' : 'Não tem uma conta? Cadastre-se'}
           </button>
+
+          <div className="pt-6 border-t border-gray-100 flex items-center justify-center gap-3 grayscale opacity-50">
+            <img src="https://zxnsubmxqoplohcngntu.supabase.co/storage/v1/object/public/imagem/PagBank.jpg" alt="PagBank" className="h-4" referrerPolicy="no-referrer" />
+            <div className="h-4 w-[1px] bg-gray-200"></div>
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Ambiente Seguro</span>
+          </div>
         </div>
       </motion.div>
     </div>
@@ -780,6 +798,16 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
   const fetchWallet = async () => {
     if (!token) return;
     try {
+      // Sync pending PagBank deposits first
+      try {
+        await fetch('/api/pagbank/sync-pending', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+      } catch (e) {
+        console.error('Failed to sync pending deposits');
+      }
+
       const [walletRes, predRes, balanceRes, transRes] = await Promise.all([
         fetch('/api/my-wallet', {
           headers: { 'Authorization': `Bearer ${token}` }
@@ -820,6 +848,7 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
       const notif = e.detail;
       if (notif && notif.id && (
         notif.id.startsWith('dep-app-') || 
+        notif.id.startsWith('dep-paid-') || 
         notif.id.startsWith('dep-rej-') ||
         notif.id.startsWith('withdraw-app-') ||
         notif.id.startsWith('withdraw-rej-')
@@ -911,6 +940,11 @@ const WalletPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
             <ArrowLeft className="w-6 h-6" />
           </button>
           <h1 className="text-xl font-bold">Resumo Financeiro</h1>
+        </div>
+        <div className="hidden sm:flex items-center gap-3 bg-white/10 px-4 py-1.5 rounded-full backdrop-blur-sm border border-white/10">
+          <img src="https://zxnsubmxqoplohcngntu.supabase.co/storage/v1/object/public/imagem/PagBank.jpg" alt="PagBank" className="h-4 brightness-0 invert opacity-80" referrerPolicy="no-referrer" />
+          <div className="h-4 w-[1px] bg-white/20"></div>
+          <span className="text-[10px] font-bold text-white/80 uppercase tracking-widest">Ambiente Seguro</span>
         </div>
       </header>
       
@@ -1655,7 +1689,15 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
           <h1 className="text-3xl font-bold text-primary">Olá, {user?.nickname || user?.name}! 👋</h1>
           <p className="text-gray-500">Bem-vindo de volta ao Bolão10.</p>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="bg-white px-4 py-2 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-3">
+            <img src="https://zxnsubmxqoplohcngntu.supabase.co/storage/v1/object/public/imagem/PagBank.jpg" alt="PagBank" className="h-6" referrerPolicy="no-referrer" />
+            <div className="h-8 w-[1px] bg-gray-200"></div>
+            <div className="flex flex-col">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest leading-none">Ambiente</span>
+              <span className="text-xs font-bold text-green-600 uppercase tracking-wider">100% Seguro</span>
+            </div>
+          </div>
           <a 
             href="https://chat.whatsapp.com/LWJCq74sKbvGav8mYX6Kx7?mode=gi_t" 
             target="_blank" 
@@ -1663,7 +1705,7 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
             className="flex items-center gap-2 bg-[#25D366] text-white px-6 py-3 rounded-2xl font-bold hover:bg-[#128C7E] transition-all shadow-md hover:shadow-lg w-fit"
           >
             <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
-            Entrar no Grupo do WhatsApp
+            Entrar no Grupo
           </a>
         </div>
       </div>
@@ -2115,11 +2157,12 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
-      <div className="mb-8 flex items-center justify-between">
+      <div className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h2 className="text-3xl font-bold text-primary">Rodada #{round.number}</h2>
-        <div className="flex space-x-2">
-          <div className={`w-3 h-3 rounded-full ${step >= 1 ? 'bg-secondary' : 'bg-gray-200'}`} />
-          <div className={`w-3 h-3 rounded-full ${step >= 2 ? 'bg-secondary' : 'bg-gray-200'}`} />
+        <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-2xl border border-gray-100 shadow-sm w-fit">
+          <img src="https://zxnsubmxqoplohcngntu.supabase.co/storage/v1/object/public/imagem/PagBank.jpg" alt="PagBank" className="h-4" referrerPolicy="no-referrer" />
+          <div className="h-4 w-[1px] bg-gray-200"></div>
+          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Ambiente Seguro</span>
         </div>
       </div>
 
