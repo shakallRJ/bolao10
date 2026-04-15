@@ -1077,6 +1077,23 @@ app.post('/api/pagbank/create-payment', authenticate, async (req: any, res) => {
 
     if (depErr) throw depErr;
 
+    // Notify admins about the new pending deposit
+    try {
+      await addAdminNotification({
+        title: 'Nova Solicitação de Depósito',
+        message: `Usuário ${req.user.name || req.user.nickname || 'Sem Nome'} (${req.user.email}) iniciou um depósito de R$ ${depositAmount.toFixed(2)} via ${method === 'pix' ? 'PIX' : 'Cartão'}.`,
+        type: 'deposit_pending',
+        user_id: req.user.id,
+        user_name: req.user.name || req.user.nickname || 'Sem Nome',
+        user_email: req.user.email,
+        user_phone: req.user.phone,
+        amount: depositAmount
+      });
+    } catch (notifErr) {
+      console.error('Error sending admin notification for deposit:', notifErr);
+      // Don't fail the request if notification fails
+    }
+
     // 2. Prepare PagBank Request
     const appUrl = process.env.APP_URL || `https://${req.get('host')}`;
     const orderData: any = {

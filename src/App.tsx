@@ -3051,12 +3051,12 @@ const AdminDashboard = () => {
                       <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
                         n.type === 'forgot_password' ? 'bg-orange-100 text-orange-600' : 
                         n.type === 'withdrawal_request' ? 'bg-red-100 text-red-600' :
-                        n.type === 'deposit_request' ? 'bg-green-100 text-green-600' :
+                        (n.type === 'deposit_request' || n.type === 'deposit_pending') ? 'bg-green-100 text-green-600' :
                         'bg-blue-100 text-blue-600'
                       }`}>
                         {n.type === 'forgot_password' ? <AlertCircle className="w-5 h-5" /> : 
                          n.type === 'withdrawal_request' ? <ArrowUpCircle className="w-5 h-5" /> :
-                         n.type === 'deposit_request' ? <ArrowDownCircle className="w-5 h-5" /> :
+                         (n.type === 'deposit_request' || n.type === 'deposit_pending') ? <ArrowDownCircle className="w-5 h-5" /> :
                          <Bell className="w-5 h-5" />}
                       </div>
                       <div>
@@ -3106,7 +3106,16 @@ const AdminDashboard = () => {
                             </button>
                           )}
 
-                          {(n.type === 'withdrawal_request' || n.type === 'deposit_request') && n.user_phone && (
+                          {n.type === 'deposit_pending' && (
+                            <button 
+                              onClick={() => setActiveTab('user-wallets')}
+                              className="bg-green-50 text-green-600 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-green-100 transition-colors flex items-center"
+                            >
+                              <ArrowDownCircle className="w-3.5 h-3.5 mr-1.5" /> Ver Carteiras
+                            </button>
+                          )}
+
+                          {(n.type === 'withdrawal_request' || n.type === 'deposit_request' || n.type === 'deposit_pending') && n.user_phone && (
                             <a 
                               href={`https://wa.me/55${n.user_phone.replace(/\D/g, '')}?text=Olá ${n.user_name}, sobre seu pedido de ${n.type === 'withdrawal_request' ? 'saque' : 'depósito'} no Bolão10...`}
                               target="_blank"
