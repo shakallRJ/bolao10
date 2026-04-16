@@ -210,7 +210,7 @@ const isAdmin = (req: any, res: any, next: any) => {
 };
 
 // --- API ROUTES ---
-// Last sync trigger: 2026-04-16 v11-pagbank-sandbox-prod
+// Last sync trigger: 2026-04-16 v12-homologation-logs
 
 app.get('/api/health', async (req, res) => {
   try {
@@ -1168,6 +1168,8 @@ app.post('/api/pagbank/create-payment', authenticate, async (req: any, res) => {
     console.log(`[PagBank ${isSandbox ? 'SANDBOX' : 'PRODUCTION'}] Enviando requisição para: ${apiUrl}`);
     console.log(`Auth Masked: Bearer ${maskedToken}`);
     
+    console.log(`[PAGBANK_HOMOLOGATION_REQUEST] ${JSON.stringify(orderData, null, 2)}`);
+    
     const pbRes = await fetch(apiUrl, {
       method: 'POST',
       headers,
@@ -1179,6 +1181,7 @@ app.post('/api/pagbank/create-payment', authenticate, async (req: any, res) => {
 
     if (contentType && contentType.includes('application/json')) {
       pbData = await pbRes.json();
+      console.log(`[PAGBANK_HOMOLOGATION_RESPONSE] (Status: ${pbRes.status}) ${JSON.stringify(pbData, null, 2)}`);
     } else {
       const textError = await pbRes.text();
       console.error(`PagBank Non-JSON Response (${pbRes.status}):`, textError);
