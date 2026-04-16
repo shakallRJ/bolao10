@@ -199,7 +199,7 @@ const isAdmin = (req: any, res: any, next: any) => {
 };
 
 // --- API ROUTES ---
-// Last sync trigger: 2026-04-16 v2
+// Last sync trigger: 2026-04-16 v3-force-redeploy
 
 app.get('/api/health', async (req, res) => {
   try {
