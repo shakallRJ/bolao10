@@ -6,7 +6,7 @@ import jwt from 'jsonwebtoken';
 import * as bcrypt from 'bcryptjs';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { supabase } from './src/supabase';
+import { supabase } from './src/supabase.ts';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer } from 'http';
 
@@ -199,7 +199,7 @@ const isAdmin = (req: any, res: any, next: any) => {
 };
 
 // --- API ROUTES ---
-// Last sync trigger: 2026-04-16 v4-module-fix
+// Last sync trigger: 2026-04-16 v5-node22-fix
 
 app.get('/api/health', async (req, res) => {
   try {
