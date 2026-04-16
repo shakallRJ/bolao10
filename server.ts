@@ -6,7 +6,7 @@ import jwt from 'jsonwebtoken';
 import * as bcrypt from 'bcryptjs';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { supabase } from './src/supabase';
+import { supabase } from './src/supabase.js';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer } from 'http';
 
@@ -17,17 +17,12 @@ console.log('Node Version:', process.version);
 console.log('Vercel Environment:', !!process.env.VERCEL);
 
 const app = express();
-const httpServer = createServer(app);
 const PORT = 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'bolao10-secret-key-2024';
 
 import webpush from 'web-push';
 
-// WebSocket Server
-let wss: WebSocketServer | null = null;
-if (!process.env.VERCEL) {
-  wss = new WebSocketServer({ server: httpServer });
-}
+// Initialize variables that will be used in routes
 const clients = new Map<string, WebSocket>();
 
 // Web Push Configuration
@@ -142,30 +137,39 @@ const addAdminNotification = async (notification: any) => {
   }
 };
 
-wss.on('connection', (ws, req) => {
-  let userId: string | null = null;
+if (!process.env.VERCEL) {
+  const httpServer = createServer(app);
+  const wss = new WebSocketServer({ server: httpServer });
 
-  ws.on('message', (message) => {
-    try {
-      const data = JSON.parse(message.toString());
-      if (data.type === 'auth' && data.token) {
-        const decoded = jwt.verify(data.token, JWT_SECRET) as any;
-        userId = decoded.id.toString();
-        clients.set(userId, ws);
-        console.log(`User ${userId} connected via WebSocket`);
+  wss.on('connection', (ws, req) => {
+    let userId: string | null = null;
+
+    ws.on('message', (message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        if (data.type === 'auth' && data.token) {
+          const decoded = jwt.verify(data.token, JWT_SECRET) as any;
+          userId = decoded.id.toString();
+          clients.set(userId, ws);
+          console.log(`User ${userId} connected via WebSocket`);
+        }
+      } catch (err) {
+        console.error('WS Auth error:', err);
       }
-    } catch (err) {
-      console.error('WS Auth error:', err);
-    }
+    });
+
+    ws.on('close', () => {
+      if (userId) {
+        clients.delete(userId);
+        console.log(`User ${userId} disconnected from WebSocket`);
+      }
+    });
   });
 
-  ws.on('close', () => {
-    if (userId) {
-      clients.delete(userId);
-      console.log(`User ${userId} disconnected from WebSocket`);
-    }
+  httpServer.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on http://localhost:${PORT}`);
   });
-});
+}
 
 // Ensure uploads directory exists
 const uploadsDir = process.env.VERCEL ? '/tmp/uploads' : path.resolve(process.cwd(), 'uploads');
@@ -206,7 +210,7 @@ const isAdmin = (req: any, res: any, next: any) => {
 };
 
 // --- API ROUTES ---
-// Last sync trigger: 2026-04-16 v9-vite-fix
+// Last sync trigger: 2026-04-16 v10-esm-js-fix
 
 app.get('/api/health', async (req, res) => {
   try {
@@ -2748,7 +2752,7 @@ app.all('/api/*', (req, res) => {
 });
 
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -2758,18 +2762,13 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api/')) return next();
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
-
-  httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
 }
 
-if (!process.env.VERCEL) {
-  startServer();
-}
+startServer();
 
 export default app;

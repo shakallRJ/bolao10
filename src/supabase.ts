@@ -13,3 +13,5 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
     persistSession: false
   }
 });
+
+// Final ESM touch
