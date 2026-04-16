@@ -210,7 +210,7 @@ const isAdmin = (req: any, res: any, next: any) => {
 };
 
 // --- API ROUTES ---
-// Last sync trigger: 2026-04-16 v10-esm-js-fix
+// Last sync trigger: 2026-04-16 v11-pagbank-sandbox-prod
 
 app.get('/api/health', async (req, res) => {
   try {
@@ -1027,7 +1027,7 @@ const PAGBANK_TOKEN = process.env.PAGBANK_TOKEN?.trim();
 const PAGBANK_APP_KEY = process.env.PAGBANK_APP_KEY?.trim();
 const PAGBANK_EMAIL = process.env.PAGBANK_EMAIL?.trim();
 // Ensure no trailing slash in host
-const PAGBANK_API_HOST = (process.env.PAGBANK_API_HOST || 'https://api.pagseguro.com').replace(/\/$/, '');
+const PAGBANK_API_HOST = (process.env.PAGBANK_API_HOST || 'https://sandbox.api.pagseguro.com').replace(/\/$/, '');
 
 app.get('/api/pagbank/public-key', authenticate, async (req: any, res) => {
   try {
@@ -1107,7 +1107,12 @@ app.post('/api/pagbank/create-payment', authenticate, async (req: any, res) => {
     }
 
     // 2. Prepare PagBank Request
-    const appUrl = process.env.APP_URL || `https://${req.get('host')}`;
+    // For Vercel, prioritize custom domain if configured, otherwise use request host
+    const appUrl = process.env.APP_URL || (req.get('host')?.includes('vercel.app') ? `https://${req.get('host')}` : 'https://www.bolao10.com');
+    const webhookUrl = `${appUrl}/api/pagbank/webhook`;
+    
+    console.log(`[PagBank] Usando URL de Webhook: ${webhookUrl}`);
+
     const orderData: any = {
       reference_id: `DEP-${deposit.id}`,
       customer: {
@@ -1121,7 +1126,7 @@ app.post('/api/pagbank/create-payment', authenticate, async (req: any, res) => {
         quantity: 1,
         unit_amount: Math.round(depositAmount * 100)
       }],
-      notification_urls: [`${appUrl}/api/pagbank/webhook`]
+      notification_urls: [webhookUrl]
     };
 
     if (method === 'pix') {
