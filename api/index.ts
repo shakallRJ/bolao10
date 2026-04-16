@@ -1,4 +1,4 @@
-import app from '../server';
+import app from '../server.js';
 
 // Global error handler for Vercel
 app.use((err: any, req: any, res: any, next: any) => {

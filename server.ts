@@ -6,7 +6,7 @@ import jwt from 'jsonwebtoken';
 import * as bcrypt from 'bcryptjs';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { supabase } from './src/supabase';
+import { supabase } from './src/supabase.ts';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer } from 'http';
 
