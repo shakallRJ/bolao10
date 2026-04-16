@@ -318,10 +318,8 @@ const Navbar = ({ onNavigate, currentPage }: { onNavigate: (page: string) => voi
     { id: 'predictions', label: 'Fazer Palpite', icon: Trophy, show: !!user && !isAdmin },
     { id: 'wallet', label: 'Minha Carteira', icon: Wallet, show: !!user && !isAdmin },
     { id: 'referral', label: 'Indique e Ganhe', icon: Users, show: !!user && !isAdmin },
-    { id: 'profile', label: 'Meu Perfil', icon: UserIcon, show: !!user },
     { id: 'transparency', label: 'Transparência', icon: ShieldCheck, show: !!user },
     { id: 'ranking', label: 'Ranking', icon: BarChart2, show: !!user },
-    { id: 'terms', label: 'Regras', icon: FileText, show: true },
     { id: 'admin', label: 'Admin', icon: ShieldCheck, show: isAdmin },
     { id: 'admin-rounds', label: 'Gerenciar Rodadas', icon: ListOrdered, show: isAdmin },
   ];
@@ -4974,6 +4972,86 @@ const TermsPage = () => {
   );
 };
 
+const PrivacyPage = () => {
+  return (
+    <div className="max-w-4xl mx-auto px-4 py-12">
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-white p-8 md:p-12 rounded-[40px] shadow-sm border border-gray-100"
+      >
+        <h1 className="text-4xl font-bold text-primary mb-8">POLÍTICA DE PRIVACIDADE – BOLÃO10</h1>
+        
+        <div className="prose prose-slate max-w-none space-y-8 text-gray-600 leading-relaxed">
+          <section>
+            <h2 className="text-2xl font-bold text-primary mb-4">1. Introdução</h2>
+            <p>
+              A plataforma Bolão10 valoriza a privacidade de seus usuários. Esta Política de Privacidade descreve como coletamos, usamos e protegemos suas informações pessoais ao utilizar nosso site.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-2xl font-bold text-primary mb-4">2. Coleta de Dados</h2>
+            <p className="mb-4">Para o funcionamento da plataforma e processamento de pagamentos, coletamos:</p>
+            <ul className="list-disc pl-5 space-y-4">
+              <li>
+                <strong>Dados de Identificação:</strong> Nome completo, e-mail e CPF (necessário para emissão de pagamentos e segurança).
+              </li>
+              <li>
+                <strong>Dados de Pagamento:</strong> As transações são processadas pelo gateway PagBank. O Bolão10 não armazena dados sensíveis de cartões de crédito em seus servidores, utilizando apenas tokens de transação seguros.
+              </li>
+              <li>
+                <strong>Dados de Uso:</strong> Registros de palpites, histórico de depósitos e movimentações de saldo dentro da plataforma.
+              </li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="text-2xl font-bold text-primary mb-4">3. Finalidade dos Dados</h2>
+            <p className="mb-4">Os dados coletados são utilizados exclusivamente para:</p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li>Gerenciar sua conta e garantir o acesso aos bolões.</li>
+              <li>Processar depósitos e resgates de prêmios.</li>
+              <li>Garantir a integridade e transparência das rodadas.</li>
+              <li>Prevenir fraudes e garantir a conformidade com as normas financeiras.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="text-2xl font-bold text-primary mb-4">4. Compartilhamento de Informações</h2>
+            <p className="mb-4">O Bolão10 não vende ou aluga dados de usuários. O compartilhamento ocorre apenas com:</p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li><strong>PagBank:</strong> Para o processamento das transações financeiras.</li>
+              <li><strong>Autoridades Legais:</strong> Caso seja exigido por lei ou ordem judicial.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="text-2xl font-bold text-primary mb-4">5. Segurança</h2>
+            <p>
+              Utilizamos certificados SSL para criptografia de dados e o banco de dados Supabase para garantir o armazenamento seguro das informações. Adotamos as melhores práticas de desenvolvimento para proteger o ambiente contra acessos não autorizados.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-2xl font-bold text-primary mb-4">6. Seus Direitos</h2>
+            <p>
+              O usuário tem o direito de solicitar a correção, atualização ou exclusão de seus dados pessoais, bem como o encerramento de sua conta a qualquer momento, desde que não haja pendências financeiras.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-2xl font-bold text-primary mb-4">7. Contato</h2>
+            <p>
+              Para dúvidas sobre esta política, entre em contato através do e-mail: <a href="mailto:admin@bolao10.com" className="text-primary hover:underline font-bold">admin@bolao10.com</a>
+            </p>
+          </section>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
 export default function App() {
   const [page, setPage] = useState('landing');
   const { isAuthenticated, isAdmin, token } = useAuth();
@@ -5062,6 +5140,7 @@ export default function App() {
       case 'transparency': return <TransparencyPage />;
       case 'ranking': return <RankingPage />;
       case 'terms': return <TermsPage />;
+      case 'privacy': return <PrivacyPage />;
       default: return <LandingPage onNavigate={setPage} />;
     }
   };
@@ -5085,6 +5164,20 @@ export default function App() {
       </main>
       <footer className="bg-white border-t border-gray-100 py-8">
         <div className="max-w-7xl mx-auto px-4 text-center">
+          <div className="mb-4 flex justify-center space-x-6">
+            <button 
+              onClick={() => setPage('terms')}
+              className="text-xs font-bold text-gray-500 hover:text-primary uppercase tracking-wider transition-colors"
+            >
+              Termos de Uso
+            </button>
+            <button 
+              onClick={() => setPage('privacy')}
+              className="text-xs font-bold text-gray-500 hover:text-primary uppercase tracking-wider transition-colors"
+            >
+              Política de Privacidade
+            </button>
+          </div>
           <p className="text-sm text-gray-500">© 2026 BOLÃO10 - Entretenimento baseado em conhecimento esportivo.</p>
           <p className="text-xs text-gray-400 mt-2">Plataforma transparente e auditável entre amigos.</p>
           <div className="mt-4 flex justify-center items-center space-x-4">
