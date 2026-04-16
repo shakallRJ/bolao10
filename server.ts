@@ -6,7 +6,7 @@ import jwt from 'jsonwebtoken';
 import * as bcrypt from 'bcryptjs';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { supabase } from './src/supabase.ts';
+import { supabase } from './src/supabase.js';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer } from 'http';
 
@@ -20,7 +20,10 @@ const JWT_SECRET = process.env.JWT_SECRET || 'bolao10-secret-key-2024';
 import webpush from 'web-push';
 
 // WebSocket Server
-const wss = new WebSocketServer({ server: httpServer });
+let wss: WebSocketServer | null = null;
+if (!process.env.VERCEL) {
+  wss = new WebSocketServer({ server: httpServer });
+}
 const clients = new Map<string, WebSocket>();
 
 // Web Push Configuration
@@ -199,7 +202,7 @@ const isAdmin = (req: any, res: any, next: any) => {
 };
 
 // --- API ROUTES ---
-// Last sync trigger: 2026-04-16 v6-tsx-production
+// Last sync trigger: 2026-04-16 v7-final-esm-fix
 
 app.get('/api/health', async (req, res) => {
   try {
