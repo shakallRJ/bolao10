@@ -6,11 +6,15 @@ import jwt from 'jsonwebtoken';
 import * as bcrypt from 'bcryptjs';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { supabase } from './src/supabase.js';
+import { supabase } from './src/supabase';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer } from 'http';
 
 dotenv.config();
+
+console.log('🚀 Servidor Bolão10 iniciando...');
+console.log('Node Version:', process.version);
+console.log('Vercel Environment:', !!process.env.VERCEL);
 
 const app = express();
 const httpServer = createServer(app);
@@ -202,7 +206,7 @@ const isAdmin = (req: any, res: any, next: any) => {
 };
 
 // --- API ROUTES ---
-// Last sync trigger: 2026-04-16 v7-final-esm-fix
+// Last sync trigger: 2026-04-16 v8-desperation-fix
 
 app.get('/api/health', async (req, res) => {
   try {
