@@ -2091,6 +2091,96 @@ app.post('/api/admin/wallets/deposit', authenticate, isAdmin, async (req: any, r
   }
 });
 
+app.post('/api/admin/wallets/withdraw', authenticate, isAdmin, async (req: any, res) => {
+  const { userId, amount, description } = req.body;
+  
+  if (!userId || !amount || parseFloat(amount) <= 0) {
+    return res.status(400).json({ error: 'Dados inválidos para retirada' });
+  }
+
+  try {
+    // 1. Get user's wallet
+    const { data: wallet, error: walletErr } = await supabase
+      .from('wallets')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+
+    if (walletErr || !wallet) {
+      return res.status(404).json({ error: 'Carteira não encontrada' });
+    }
+
+    const currentBalance = parseFloat(wallet.balance);
+    const withdrawAmount = parseFloat(amount);
+    const newBalance = currentBalance - withdrawAmount;
+
+    // 2. Update balance
+    const { error: updateErr } = await supabase
+      .from('wallets')
+      .update({ balance: newBalance, updated_at: new Date().toISOString() })
+      .eq('id', wallet.id);
+
+    if (updateErr) throw updateErr;
+
+    // 3. Record transaction
+    const { error: transErr } = await supabase
+      .from('wallet_transactions')
+      .insert([{
+        wallet_id: wallet.id,
+        amount: -withdrawAmount,
+        type: 'admin_adjustment',
+        balance_after: newBalance,
+        description: description || 'Retirada manual via administrativo'
+      }]);
+
+    if (transErr) throw transErr;
+
+    // 4. Send notification to user
+    sendRealtimeNotification(userId.toString(), {
+      type: 'notification',
+      data: {
+        id: `admin-withdraw-${Date.now()}`,
+        type: 'admin_msg',
+        msgType: 'warning',
+        title: '⚠️ Débito em Carteira',
+        message: `Uma retirada de R$ ${withdrawAmount.toFixed(2)} foi realizada da sua carteira pelo administrador. Motivo: ${description || 'Ajuste administrativo'}`,
+        created_at: new Date().toISOString()
+      }
+    });
+
+    res.json({ success: true, newBalance });
+  } catch (err: any) {
+    console.error('Manual withdrawal error:', err);
+    res.status(500).json({ error: 'Erro ao realizar retirada manual' });
+  }
+});
+
+app.get('/api/admin/deposits/all', authenticate, isAdmin, async (req, res) => {
+  try {
+    const { data: deposits, error } = await supabase
+      .from('deposits')
+      .select(`
+        *,
+        users!deposits_user_id_fkey (name, email, nickname)
+      `)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    const formatted = deposits?.map((d: any) => ({
+      ...d,
+      user_name: d.users?.name || 'N/A',
+      user_nickname: d.users?.nickname || 'N/A',
+      user_email: d.users?.email || 'N/A'
+    }));
+
+    res.json(formatted || []);
+  } catch (err) {
+    console.error('Fetch all deposits error:', err);
+    res.status(500).json({ error: 'Falha ao buscar histórico de depósitos' });
+  }
+});
+
 // Admin: User Management
 app.get('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   try {

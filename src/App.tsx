@@ -40,6 +40,7 @@ import {
   ChevronDown,
   ChevronUp,
   PlusCircle,
+  MinusCircle,
   XCircle,
   Users,
   ArrowUpCircle,
@@ -2652,6 +2653,48 @@ const AdminDashboard = () => {
     }
   };
 
+  const [showManualWithdrawModal, setShowManualWithdrawModal] = useState(false);
+  const [manualWithdrawForm, setManualWithdrawForm] = useState({ userId: '', amount: '', description: '' });
+
+  const handleManualWithdraw = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualWithdrawForm.userId || !manualWithdrawForm.amount) return;
+
+    try {
+      const res = await fetch('/api/admin/wallets/withdraw', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(manualWithdrawForm)
+      });
+
+      if (res.ok) {
+        toast.success('Retirada realizada com sucesso!');
+        setManualWithdrawForm({ userId: '', amount: '', description: '' });
+        setShowManualWithdrawModal(false);
+        fetchUserWallets();
+      } else {
+        const error = await res.json();
+        toast.error(error.error || 'Erro ao realizar retirada');
+      }
+    } catch (err) {
+      console.error('Manual withdraw error:', err);
+      toast.error('Erro de conexão ao realizar retirada');
+    }
+  };
+
+  const [allDeposits, setAllDeposits] = useState<any[]>([]);
+  const fetchAllDeposits = async () => {
+    const res = await fetch('/api/admin/deposits/all', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (res.ok) {
+      setAllDeposits(await res.json());
+    }
+  };
+
   const fetchRoundHistory = async () => {
     const res = await fetch('/api/rounds');
     const data = await res.json();
@@ -2696,6 +2739,7 @@ const AdminDashboard = () => {
     if (activeTab === 'user-wallets') {
       promises.push(fetchUserWallets());
       promises.push(fetchPendingDeposits());
+      promises.push(fetchAllDeposits());
     }
     if (activeTab === 'history') promises.push(fetchRoundHistory());
     Promise.all(promises).finally(() => setLoading(false));
@@ -3445,7 +3489,7 @@ const AdminDashboard = () => {
                     />
                     <Users className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   </div>
-                  <button onClick={fetchUserWallets} className="text-sm text-blue-500 hover:underline shrink-0">
+                  <button onClick={() => { fetchUserWallets(); fetchAllDeposits(); }} className="text-sm text-blue-500 hover:underline shrink-0">
                     Atualizar
                   </button>
                 </div>
@@ -3503,20 +3547,92 @@ const AdminDashboard = () => {
                             </button>
                           </td>
                           <td className="px-6 py-4">
-                            <button 
-                              onClick={() => {
-                                setManualDepositForm({ ...manualDepositForm, userId: uw.user.id });
-                                setShowManualDepositModal(true);
-                              }}
-                              className="p-2 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 transition-colors"
-                              title="Depósito Manual"
-                            >
-                              <PlusCircle className="w-5 h-5" />
-                            </button>
+                            <div className="flex flex-col gap-2">
+                              <button 
+                                onClick={() => {
+                                  setManualDepositForm({ ...manualDepositForm, userId: uw.user.id });
+                                  setShowManualDepositModal(true);
+                                }}
+                                className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-600 rounded-lg text-xs font-bold hover:bg-green-100 transition-colors"
+                                title="Depósito Manual"
+                              >
+                                <PlusCircle className="w-3.5 h-3.5" />
+                                Depósito
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  setManualWithdrawForm({ ...manualWithdrawForm, userId: uw.user.id });
+                                  setShowManualWithdrawModal(true);
+                                }}
+                                className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-bold hover:bg-red-100 transition-colors"
+                                title="Retirada Manual"
+                              >
+                                <MinusCircle className="w-3.5 h-3.5" />
+                                Retirada
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ));
                     })()}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+              <div className="p-6 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                <h3 className="font-bold text-primary flex items-center gap-2">
+                  <History className="w-5 h-5 text-purple-500" />
+                  Histórico Recente de Depósitos (PIX / Manual)
+                </h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">
+                      <th className="px-6 py-4">Usuário</th>
+                      <th className="px-6 py-4">Data</th>
+                      <th className="px-6 py-4">Valor</th>
+                      <th className="px-6 py-4">Método</th>
+                      <th className="px-6 py-4">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {allDeposits.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="px-6 py-8 text-center text-gray-400 italic">Nenhum depósito encontrado.</td>
+                      </tr>
+                    ) : (
+                      allDeposits.slice(0, 50).map((d) => (
+                        <tr key={d.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-6 py-4">
+                            <p className="font-bold text-primary">{d.user_name} ({d.user_nickname})</p>
+                            <p className="text-xs text-gray-500">{d.user_email}</p>
+                          </td>
+                          <td className="px-6 py-4 text-gray-600 text-sm">
+                            {new Date(d.created_at).toLocaleString('pt-BR')}
+                          </td>
+                          <td className="px-6 py-4 font-bold text-gray-900 text-sm">
+                            R$ {d.amount.toFixed(2)}
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className="text-xs font-medium text-gray-500 uppercase">
+                              {d.payment_method === 'pix' ? 'PIX' : d.payment_method === 'credit_card' ? 'Cartão' : 'Manual'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                              d.status === 'approved' ? 'bg-green-100 text-green-700' : 
+                              d.status === 'rejected' ? 'bg-red-100 text-red-700' : 
+                              'bg-yellow-100 text-yellow-700'
+                            }`}>
+                              {d.status === 'approved' ? 'Aprovado' : d.status === 'rejected' ? 'Rejeitado' : 'Pendente'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -3912,7 +4028,7 @@ const AdminDashboard = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
           <div className="bg-white rounded-3xl p-8 max-w-md w-full">
             <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
-              <PlusCircle className="w-6 h-6 text-blue-500" />
+              <PlusCircle className="w-6 h-6 text-green-500" />
               Depósito Manual
             </h3>
             <form onSubmit={handleManualDeposit} className="space-y-4">
@@ -3936,7 +4052,7 @@ const AdminDashboard = () => {
                   value={manualDepositForm.description}
                   onChange={(e) => setManualDepositForm({...manualDepositForm, description: e.target.value})}
                   className="w-full px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-primary outline-none"
-                  placeholder="Ex: Prêmio de indicação"
+                  placeholder="Ex: Pagamento via PIX direto"
                 />
               </div>
               <div className="flex gap-4 pt-4">
@@ -3949,9 +4065,119 @@ const AdminDashboard = () => {
                 </button>
                 <button 
                   type="submit" 
-                  className="flex-1 py-2 bg-primary text-white rounded-xl font-bold hover:bg-secondary transition-colors shadow-md"
+                  className="flex-1 py-2 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 transition-colors shadow-md"
                 >
                   Confirmar Depósito
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Withdrawal Modal */}
+      {showManualWithdrawModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-3xl p-8 max-w-md w-full">
+            <div className="flex items-center gap-2 mb-2">
+              <MinusCircle className="w-6 h-6 text-red-500" />
+              <h3 className="text-xl font-bold">Retirada Manual de Saldo</h3>
+            </div>
+            <p className="text-xs text-red-600 mb-6 font-medium bg-red-50 p-3 rounded-xl border border-red-100">
+              Atenção: O valor inserido será subtraído do saldo disponível do usuário.
+            </p>
+            <form onSubmit={handleManualWithdraw} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Valor (R$)</label>
+                <input 
+                  type="number" 
+                  step="0.01"
+                  required
+                  value={manualWithdrawForm.amount}
+                  onChange={(e) => setManualWithdrawForm({...manualWithdrawForm, amount: e.target.value})}
+                  className="w-full px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-red-500 outline-none"
+                  placeholder="0.00"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Motivo / Descrição</label>
+                <input 
+                  type="text" 
+                  required
+                  value={manualWithdrawForm.description}
+                  onChange={(e) => setManualWithdrawForm({...manualWithdrawForm, description: e.target.value})}
+                  className="w-full px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-red-500 outline-none"
+                  placeholder="Ex: Correção de erro / Estorno"
+                />
+              </div>
+              <div className="flex gap-4 pt-4">
+                <button 
+                  type="button" 
+                  onClick={() => setShowManualWithdrawModal(false)} 
+                  className="flex-1 py-2 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit" 
+                  className="flex-1 py-2 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-colors shadow-md"
+                >
+                  Confirmar Retirada
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Withdrawal Modal */}
+      {showManualWithdrawModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-[32px] p-8 max-w-md w-full shadow-2xl">
+            <div className="flex items-center gap-2 mb-2">
+              <MinusCircle className="w-6 h-6 text-red-500" />
+              <h3 className="text-xl font-bold">Retirada Manual</h3>
+            </div>
+            <p className="text-xs text-red-600 mb-6 font-medium bg-red-50 p-3 rounded-xl border border-red-100">
+              Atenção: O valor inserido será subtraído do saldo disponível do usuário.
+            </p>
+            <form onSubmit={handleManualWithdraw} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Valor (R$)</label>
+                <input 
+                  type="number" 
+                  step="0.01"
+                  required
+                  value={manualWithdrawForm.amount}
+                  onChange={(e) => setManualWithdrawForm({...manualWithdrawForm, amount: e.target.value})}
+                  className="w-full px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-red-500 outline-none"
+                  placeholder="0.00"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Motivo / Descrição</label>
+                <input 
+                  type="text" 
+                  required
+                  value={manualWithdrawForm.description}
+                  onChange={(e) => setManualWithdrawForm({...manualWithdrawForm, description: e.target.value})}
+                  className="w-full px-4 py-2 rounded-xl border border-gray-200 focus:ring-2 focus:ring-red-500 outline-none"
+                  placeholder="Ex: Correção de erro / Estorno"
+                />
+              </div>
+              <div className="flex gap-4 pt-4">
+                <button 
+                  type="button" 
+                  onClick={() => setShowManualWithdrawModal(false)} 
+                  className="flex-1 py-2 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit" 
+                  className="flex-1 py-2 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-colors shadow-md"
+                >
+                  Confirmar Retirada
                 </button>
               </div>
             </form>
