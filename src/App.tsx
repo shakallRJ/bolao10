@@ -1922,7 +1922,7 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
             <h3 className="text-xl font-bold mb-2">Ranking de Transparência</h3>
             <p className="text-white text-opacity-70 text-sm mb-6">Confira quem são os maiores pontuadores da plataforma.</p>
             <button 
-              onClick={() => onNavigate('transparency')}
+              onClick={() => onNavigate('ranking')}
               className="w-full bg-white text-primary py-3 rounded-xl font-bold hover:bg-opacity-90 transition-all"
             >
               Ver Ranking
@@ -1934,15 +1934,15 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
             <ul className="space-y-4 text-sm text-gray-600">
               <li className="flex items-start">
                 <div className="w-5 h-5 bg-secondary bg-opacity-10 text-secondary rounded-full flex items-center justify-center mr-3 mt-0.5 font-bold text-xs">1</div>
-                Faça seus palpites nos 10 jogos da rodada.
+                <strong>Adicione Saldo:</strong> Deposite em sua carteira via PIX ou Cartão através do PagBank.
               </li>
               <li className="flex items-start">
                 <div className="w-5 h-5 bg-secondary bg-opacity-10 text-secondary rounded-full flex items-center justify-center mr-3 mt-0.5 font-bold text-xs">2</div>
-                Envie o comprovante do PIX (R$ {currentRound?.entry_value.toFixed(2) || '10,00'}).
+                <strong>Palpites:</strong> Escolha os resultados dos 10 jogos da rodada. Cada palpite custa R$ {currentRound?.entry_value.toFixed(2) || '10,00'}.
               </li>
               <li className="flex items-start">
                 <div className="w-5 h-5 bg-secondary bg-opacity-10 text-secondary rounded-full flex items-center justify-center mr-3 mt-0.5 font-bold text-xs">3</div>
-                Acompanhe os jogos e torça para ser o maior pontuador!
+                <strong>Prêmios:</strong> 75% da arrecadação vai para os vencedores. Resgate seu saldo quando quiser!
               </li>
             </ul>
           </div>
@@ -5210,10 +5210,10 @@ const TermsPage = () => {
           <section>
             <h2 className="text-2xl font-bold text-primary mb-4">3. Carteira, Depósitos e Saques</h2>
             <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Depósitos:</strong> Os depósitos são feitos via PIX. Após realizar a transferência, você pode informar o valor no sistema e anexar o comprovante para validação manual pelo administrador. O saldo será creditado em sua carteira assim que confirmado.</li>
-              <li><strong>Premiação:</strong> Os prêmios conquistados são creditados diretamente em sua carteira virtual após a finalização e conferência da rodada.</li>
-              <li><strong>Saques:</strong> Você pode solicitar o saque do seu saldo disponível a qualquer momento. O administrador processará o pagamento via PIX para a chave informada no pedido de saque.</li>
-              <li><strong>Transparência:</strong> Após o início da rodada, a lista de palpites de todos os usuários que confirmaram participação será publicada na área "Ranking de Transparência", permitindo que todos confiram os resultados.</li>
+              <li><strong>Depósitos:</strong> Os depósitos são processados via PagBank, oferecendo opções de PIX e Cartão de Crédito. O saldo é creditado automaticamente em sua carteira virtual assim que a confirmação for recebida pelo gateway.</li>
+              <li><strong>Premiação:</strong> Os prêmios conquistados são creditados diretamente em sua carteira virtual após a finalização e auditoria da rodada.</li>
+              <li><strong>Saques:</strong> Você pode solicitar o saque do seu saldo disponível a partir do valor mínimo estipulado. O processamento é realizado via PIX para a chave cadastrada em seu perfil.</li>
+              <li><strong>Transparência:</strong> Garantimos a integridade do jogo. Após o início da rodada, os palpites de todos os participantes ficam disponíveis para consulta pública no Ranking de Transparência.</li>
             </ul>
           </section>
 
