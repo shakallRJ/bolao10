@@ -4085,6 +4085,34 @@ const TransparencyPage = () => {
   const [predictions, setPredictions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasAccess, setHasAccess] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  const fetchData = async () => {
+    if (!selectedRoundId) return;
+    setLoading(true);
+    
+    // Check access
+    const accessRes = await fetch(`/api/rounds/${selectedRoundId}/check-prediction`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const accessData = await safeJson(accessRes);
+    const userHasAccess = accessData?.hasPrediction || isAdmin;
+    setHasAccess(userHasAccess);
+
+    if (userHasAccess) {
+      // Fetch round details including games
+      const roundRes = await fetch(`/api/rounds/${selectedRoundId}`);
+      const roundData = await safeJson(roundRes);
+      setRound(roundData);
+
+      const transRes = await fetch(`/api/rounds/${selectedRoundId}/transparency`);
+      if (transRes.ok) {
+        const transData = await safeJson(transRes);
+        setPredictions(transData || []);
+      }
+    }
+    setLoading(false);
+  };
 
   useEffect(() => {
     const fetchRounds = async () => {
@@ -4099,35 +4127,31 @@ const TransparencyPage = () => {
   }, []);
 
   useEffect(() => {
-    if (!selectedRoundId) return;
+    fetchData();
+  }, [selectedRoundId, token, rounds, isAdmin]);
 
-    const fetchData = async () => {
-      setLoading(true);
-      
-      // Check access
-      const accessRes = await fetch(`/api/rounds/${selectedRoundId}/check-prediction`, {
+  const handleDeletePrediction = async (id: number) => {
+    if (!confirm('Tem certeza que deseja EXCLUIR este palpite? Esta ação é irreversível.')) return;
+    
+    setDeletingId(id);
+    try {
+      const res = await fetch(`/api/admin/predictions/${id}`, {
+        method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      const accessData = await safeJson(accessRes);
-      const userHasAccess = accessData?.hasPrediction || isAdmin;
-      setHasAccess(userHasAccess);
-
-      if (userHasAccess) {
-        // Fetch round details including games
-        const roundRes = await fetch(`/api/rounds/${selectedRoundId}`);
-        const roundData = await safeJson(roundRes);
-        setRound(roundData);
-
-        const transRes = await fetch(`/api/rounds/${selectedRoundId}/transparency`);
-        if (transRes.ok) {
-          const transData = await safeJson(transRes);
-          setPredictions(transData || []);
-        }
+      if (res.ok) {
+        toast.success('Palpite excluído com sucesso!');
+        fetchData();
+      } else {
+        const data = await res.json();
+        toast.error(data.error || 'Erro ao excluir palpite');
       }
-      setLoading(false);
-    };
-    fetchData();
-  }, [selectedRoundId, token, rounds]);
+    } catch (err) {
+      toast.error('Erro na conexão');
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const downloadPDF = () => {
     if (!hasAccess) return;
@@ -4263,16 +4287,31 @@ const TransparencyPage = () => {
             {predictions.map((p) => (
               <div key={p.id} className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
                 <div className="flex justify-between items-center mb-4">
-                  <h4 className="font-bold text-primary">{p.user_name}</h4>
-                  {round?.status === 'finished' ? (
-                    <span className="bg-secondary text-white px-3 py-1 rounded-full text-xs font-bold">
-                      {p.score !== null && p.score !== undefined ? `${p.score} Pontos` : '0 Pontos'}
-                    </span>
-                  ) : (
-                    <span className="bg-gray-100 text-gray-500 px-3 py-1 rounded-full text-xs font-bold">
-                      Em andamento
-                    </span>
-                  )}
+                  <div className="flex flex-col">
+                    <h4 className="font-bold text-primary leading-tight">{p.user_name}</h4>
+                    <span className="text-[10px] text-gray-400">@{p.user_nickname}</span>
+                  </div>
+                  <div className="flex flex-col items-end gap-2">
+                    {round?.status === 'finished' ? (
+                      <span className="bg-secondary text-white px-3 py-1 rounded-full text-xs font-bold">
+                        {p.score !== null && p.score !== undefined ? `${p.score} Pontos` : '0 Pontos'}
+                      </span>
+                    ) : (
+                      <span className="bg-gray-100 text-gray-500 px-3 py-1 rounded-full text-xs font-bold">
+                        Em andamento
+                      </span>
+                    )}
+                    {isAdmin && (
+                      <button
+                        onClick={() => handleDeletePrediction(p.id)}
+                        disabled={deletingId === p.id}
+                        className="text-[10px] text-red-500 hover:text-red-700 font-bold uppercase tracking-wider flex items-center gap-1 transition-colors"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        {deletingId === p.id ? 'Excluindo...' : 'Excluir'}
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="grid grid-cols-5 gap-2">
                   {(p.items || []).map((item: any, i: number) => (

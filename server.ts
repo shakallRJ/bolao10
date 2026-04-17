@@ -2461,6 +2461,36 @@ app.post('/api/admin/predictions/:id/validate', authenticate, isAdmin, async (re
   res.json({ success: true });
 });
 
+app.delete('/api/admin/predictions/:id', authenticate, isAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Check if prediction exists
+    const { data: prediction, error: fetchErr } = await supabase
+      .from('predictions')
+      .select('id, user_id, round_id')
+      .eq('id', id)
+      .single();
+
+    if (fetchErr || !prediction) {
+      return res.status(404).json({ error: 'Palpite não encontrado' });
+    }
+
+    // Delete items first
+    await supabase.from('prediction_items').delete().eq('prediction_id', id);
+    
+    // Delete the prediction
+    const { error: deleteErr } = await supabase.from('predictions').delete().eq('id', id);
+
+    if (deleteErr) throw deleteErr;
+
+    res.json({ success: true, message: 'Palpite excluído com sucesso' });
+  } catch (err) {
+    console.error('Delete prediction error:', err);
+    res.status(500).json({ error: 'Falha ao excluir palpite' });
+  }
+});
+
 app.post('/api/admin/rounds/:id/partial-results', authenticate, isAdmin, async (req, res) => {
   const { results } = req.body;
   
