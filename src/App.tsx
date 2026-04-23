@@ -45,7 +45,8 @@ import {
   Users,
   ArrowUpCircle,
   ArrowDownCircle,
-  Landmark
+  Landmark,
+  Ticket
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -1581,6 +1582,7 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
   const { token, user, logout } = useAuth();
   const [currentRound, setCurrentRound] = useState<any>(null);
   const [myPredictions, setMyPredictions] = useState<any[]>([]);
+  const [luckyNumbers, setLuckyNumbers] = useState<any[]>([]);
   const [walletData, setWalletData] = useState<any>(null);
   const [balance, setBalance] = useState<number>(0);
   const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
@@ -1591,7 +1593,7 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
   const fetchData = async () => {
     if (!token) return;
     try {
-      const [roundRes, predRes, walletRes, balanceRes] = await Promise.all([
+      const [roundRes, predRes, walletRes, balanceRes, luckyRes] = await Promise.all([
         fetch('/api/rounds/current'),
         fetch('/api/my-predictions', {
           headers: { 'Authorization': `Bearer ${token}` }
@@ -1601,10 +1603,13 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
         }),
         fetch('/api/wallet/balance', {
           headers: { 'Authorization': `Bearer ${token}` }
+        }),
+        fetch('/api/me/lucky-numbers', {
+          headers: { 'Authorization': `Bearer ${token}` }
         })
       ]);
       
-      if (roundRes.status === 401 || predRes.status === 401 || walletRes.status === 401) {
+      if (roundRes.status === 401 || predRes.status === 401 || walletRes.status === 401 || luckyRes.status === 401) {
         logout();
         return;
       }
@@ -1626,11 +1631,13 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
       const predData = await safeJson(predRes);
       const walletData = await safeJson(walletRes);
       const balanceData = await safeJson(balanceRes).catch(() => ({ balance: 0 }));
+      const luckyData = await safeJson(luckyRes).catch(() => []);
       
       setCurrentRound(roundData);
-      setMyPredictions(predData);
+      setMyPredictions(Array.isArray(predData) ? predData : []);
       setWalletData(walletData);
       setBalance(balanceData?.balance || 0);
+      setLuckyNumbers(Array.isArray(luckyData) ? luckyData : []);
     } catch (err: any) {
       console.error('Dashboard error:', err);
       setError(err.message);
@@ -1711,6 +1718,61 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Main Content */}
         <div className="lg:col-span-2 space-y-8">
+          {/* Lucky Numbers Banner */}
+          {luckyNumbers.length > 0 && (
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-gradient-to-r from-primary via-blue-900 to-primary text-white rounded-[32px] p-6 shadow-xl relative overflow-hidden"
+            >
+              <div className="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full -mr-32 -mt-32 pointer-events-none"></div>
+              <div className="absolute bottom-0 left-0 w-48 h-48 bg-secondary opacity-10 rounded-full -ml-24 -mb-24 pointer-events-none"></div>
+              
+              <div className="flex flex-col sm:flex-row items-center gap-6 relative z-10">
+                <div className="shrink-0 relative group">
+                  <div className="absolute -inset-4 bg-secondary/20 blur-2xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                  <img 
+                    src="https://zxnsubmxqoplohcngntu.supabase.co/storage/v1/object/public/imagem/Game_Stick.webp" 
+                    alt="Game Stick M15" 
+                    className="w-24 h-24 object-contain drop-shadow-2xl hover:scale-110 transition-transform"
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="absolute bottom-0 right-0 bg-yellow-400 text-primary font-black px-1.5 py-0.5 rounded text-[8px] border border-primary">
+                    M15 PRO
+                  </div>
+                </div>
+                
+                <div className="flex-1 text-center sm:text-left">
+                  <div className="flex items-center gap-2 mb-1 justify-center sm:justify-start">
+                    <Trophy className="w-4 h-4 text-yellow-400 drop-shadow-sm" />
+                    <span className="text-yellow-400 font-black text-[10px] tracking-widest uppercase drop-shadow-sm">Promoção Especial</span>
+                  </div>
+                  <h2 className="text-xl sm:text-2xl font-black mb-2 leading-tight tracking-tighter italic">
+                    SORTEIO DIA 19/07
+                  </h2>
+                  <p className="text-white/70 text-xs mb-4 max-w-sm">
+                    Ganhe CUPONS para concorrer ao GAME STICK M15 a cada palpite!
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2 justify-center sm:justify-start">
+                    <span className="text-[10px] font-bold text-white/50 uppercase tracking-widest mr-1">Seus Cupons:</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {luckyNumbers.slice(0, 6).map((num, i) => (
+                        <span key={i} className="bg-white/20 px-2 py-1 rounded-lg font-mono font-bold text-xs border border-white/10">
+                          {num.number}
+                        </span>
+                      ))}
+                      {luckyNumbers.length > 6 && (
+                        <span className="text-[10px] font-bold text-secondary">
+                          +{luckyNumbers.length - 6}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
           {/* Wallet Summary */}
           {walletData && (
             <div className="space-y-4">
@@ -1867,7 +1929,16 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
                         className="bg-gray-50 border-t border-gray-100"
                       >
                         <div className="p-4">
-                          <h4 className="text-sm font-bold text-gray-700 mb-3">Seus Palpites</h4>
+                          <div className="flex items-center justify-between mb-4">
+                            <h4 className="text-sm font-bold text-gray-700">Seus Palpites</h4>
+                            {pred.lucky_number && (
+                              <div className="flex items-center gap-2 bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-100">
+                                <Ticket className="w-4 h-4 text-primary" />
+                                <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider mr-1">Cupom Sorteio:</span>
+                                <span className="font-mono font-bold text-primary">{pred.lucky_number}</span>
+                              </div>
+                            )}
+                          </div>
                           {pred.items && pred.games ? (
                             <div className="space-y-2">
                               {pred.games.map((game: any) => {
@@ -1934,15 +2005,33 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
             <ul className="space-y-4 text-sm text-gray-600">
               <li className="flex items-start">
                 <div className="w-5 h-5 bg-secondary bg-opacity-10 text-secondary rounded-full flex items-center justify-center mr-3 mt-0.5 font-bold text-xs">1</div>
-                <strong>Adicione Saldo:</strong> Deposite em sua carteira via PIX ou Cartão através do PagBank.
+                <div>
+                  <strong>Adicione Saldo:</strong> Deposite em sua carteira via PIX ou Cartão através do PagBank de forma segura.
+                </div>
               </li>
               <li className="flex items-start">
                 <div className="w-5 h-5 bg-secondary bg-opacity-10 text-secondary rounded-full flex items-center justify-center mr-3 mt-0.5 font-bold text-xs">2</div>
-                <strong>Palpites:</strong> Escolha os resultados dos 10 jogos da rodada. Cada palpite custa R$ {currentRound?.entry_value.toFixed(2) || '10,00'}.
+                <div>
+                  <strong>Palpites:</strong> Escolha os resultados. Cada palpite custa R$ {currentRound?.entry_value.toFixed(2) || '10,00'}.
+                </div>
               </li>
               <li className="flex items-start">
                 <div className="w-5 h-5 bg-secondary bg-opacity-10 text-secondary rounded-full flex items-center justify-center mr-3 mt-0.5 font-bold text-xs">3</div>
-                <strong>Prêmios:</strong> 75% da arrecadação vai para os vencedores. Resgate seu saldo quando quiser!
+                <div>
+                  <strong>Prêmios:</strong> 75% da arrecadação vai para os vencedores. 5% vai para o pote acumulado dos 10 acertos!
+                </div>
+              </li>
+              <li className="flex items-start">
+                <div className="w-5 h-5 bg-secondary bg-opacity-10 text-secondary rounded-full flex items-center justify-center mr-3 mt-0.5 font-bold text-xs">4</div>
+                <div>
+                  <strong>Indique e Ganhe:</strong> Ganhe R$ 2,00 por cada amigo que depositar R$ 10,00 ou mais usando seu link.
+                </div>
+              </li>
+              <li className="flex items-start">
+                <div className="w-5 h-5 bg-secondary bg-opacity-10 text-secondary rounded-full flex items-center justify-center mr-3 mt-0.5 font-bold text-xs">5</div>
+                <div>
+                  <strong>Sorteio M15:</strong> Cada palpite registrado gera um cupom para o sorteio do Game Stick M15 em 19/07!
+                </div>
               </li>
             </ul>
           </div>
@@ -1963,7 +2052,7 @@ const Dashboard = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
 };
 
 const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void }) => {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [round, setRound] = useState<any>(null);
   const [guesses, setGuesses] = useState<Record<number, string>>({});
   const [predictionsList, setPredictionsList] = useState<Record<number, string>[]>(() => {
@@ -1997,6 +2086,9 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [showDeadlinePopup, setShowDeadlinePopup] = useState(false);
+  const [luckyNumbers, setLuckyNumbers] = useState<any[]>([]);
+  const [showLuckyNumberPopup, setShowLuckyNumberPopup] = useState(false);
+  const [lastLuckyNumbers, setLastLuckyNumbers] = useState<string[]>([]);
 
   const fetchWalletBalance = async () => {
     if (!token) return;
@@ -2135,12 +2227,13 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
       const data = await res.json();
       
       if (res.ok) {
-        alert('Palpites registrados com sucesso! O valor foi debitado da sua carteira.');
+        setLastLuckyNumbers(data.luckyNumbers || []);
+        setShowLuckyNumberPopup(true);
         localStorage.removeItem('bolao10_predictions_list');
         localStorage.removeItem('bolao10_prediction_step');
         setPredictionsList([]);
         setStep(1);
-        onNavigate('wallet');
+        // onNavigate('wallet'); // Don't navigate yet, show popup first
       } else {
         alert(data.error || 'Erro ao salvar palpites');
       }
@@ -2320,6 +2413,16 @@ const PredictionsPage = ({ onNavigate }: { onNavigate: (page: string) => void })
           </motion.div>
         </div>
       )}
+
+      <LuckyNumberPopup 
+        isOpen={showLuckyNumberPopup}
+        onClose={() => {
+          setShowLuckyNumberPopup(false);
+          onNavigate('wallet');
+        }}
+        numbers={lastLuckyNumbers}
+        userName={user?.name || user?.nickname}
+      />
 
       <DepositModal
         isOpen={isDepositModalOpen}
@@ -2513,9 +2616,10 @@ const AdminDashboard = () => {
   const [adminNotifications, setAdminNotifications] = useState<any[]>([]);
   const [sentNotifications, setSentNotifications] = useState<any[]>([]);
   const [referrals, setReferrals] = useState<any[]>([]);
+  const [allLuckyNumbers, setAllLuckyNumbers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewingProof, setViewingProof] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'withdrawals' | 'users' | 'financial' | 'user-wallets' | 'history' | 'notifications' | 'messages' | 'referrals'>('withdrawals');
+  const [activeTab, setActiveTab] = useState<'withdrawals' | 'users' | 'financial' | 'user-wallets' | 'history' | 'notifications' | 'messages' | 'referrals' | 'lucky-numbers'>('withdrawals');
   const [roundHistory, setRoundHistory] = useState<any[]>([]);
   
   // Notification Form State
@@ -2724,6 +2828,13 @@ const AdminDashboard = () => {
     if (res.ok) setReferrals(await res.json());
   };
 
+  const fetchAllLuckyNumbers = async () => {
+    const res = await fetch('/api/admin/lucky-numbers', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (res.ok) setAllLuckyNumbers(await res.json());
+  };
+
   useEffect(() => { 
     setLoading(true);
     const promises = [];
@@ -2732,6 +2843,7 @@ const AdminDashboard = () => {
     if (activeTab === 'notifications') promises.push(fetchNotifications());
     if (activeTab === 'messages') promises.push(fetchSentNotifications());
     if (activeTab === 'referrals') promises.push(fetchReferrals());
+    if (activeTab === 'lucky-numbers') promises.push(fetchAllLuckyNumbers());
     if (activeTab === 'financial') {
       promises.push(fetchFinancials());
       promises.push(fetchFinancialDetails());
@@ -2879,6 +2991,7 @@ const AdminDashboard = () => {
             { id: 'user-wallets', label: 'Carteiras' },
             { id: 'history', label: 'Histórico' },
             { id: 'referrals', label: 'Indicações' },
+            { id: 'lucky-numbers', label: '🏆 Sorteio' },
             { id: 'notifications', label: 'Alertas' },
             { id: 'messages', label: 'Mensagens' }
           ].map(tab => (
@@ -3072,6 +3185,59 @@ const AdminDashboard = () => {
             </table>
           </div>
         </motion.div>
+      )}
+
+      {activeTab === 'lucky-numbers' && (
+        <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+            <h3 className="font-bold text-primary">Controle de Números da Sorte (Sorteio M15)</h3>
+            <div className="bg-blue-100 text-blue-700 px-4 py-1 rounded-full text-xs font-bold">
+              Total Gerado: {allLuckyNumbers.length}
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">
+                  <th className="px-6 py-4">Status</th>
+                  <th className="px-6 py-4">Usuário</th>
+                  <th className="px-6 py-4">Número da Sorte</th>
+                  <th className="px-6 py-4">Data/Hora</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {allLuckyNumbers.map((num) => (
+                  <tr key={num.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-6 py-4">
+                      <span className="w-8 h-8 bg-green-100 text-green-600 rounded-full flex items-center justify-center">
+                        <CheckCircle className="w-5 h-5" />
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <p className="font-bold text-primary">{num.users?.name || 'Usuário Deletado'}</p>
+                      <p className="text-xs text-gray-500">@{num.users?.nickname}</p>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="bg-primary text-white px-3 py-1 rounded-lg font-mono font-bold text-lg">
+                        {num.number}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-600">
+                      {new Date(num.created_at).toLocaleString('pt-BR')}
+                    </td>
+                  </tr>
+                ))}
+                {allLuckyNumbers.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="px-6 py-12 text-center text-gray-500 italic">
+                      Nenhum número da sorte gerado ainda.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       {activeTab === 'notifications' && (
@@ -5158,6 +5324,83 @@ const RankingPage = () => {
   );
 };
 
+const LuckyNumberPopup = ({ isOpen, onClose, numbers, userName }: { isOpen: boolean, onClose: () => void, numbers: string[], userName?: string }) => {
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[150] flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+            className="bg-white rounded-[40px] shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto relative scrollbar-hide"
+          >
+            {/* Header with Image Background or Gradient */}
+            <div className="h-40 sm:h-48 bg-gradient-to-br from-primary to-blue-900 flex flex-col items-center justify-center text-center p-6 relative shrink-0">
+              <div className="absolute top-4 right-4">
+                <button onClick={onClose} className="text-white/60 hover:text-white transition-colors">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              <img 
+                src="https://zxnsubmxqoplohcngntu.supabase.co/storage/v1/object/public/imagem/Game_Stick.webp" 
+                alt="Game Stick M15" 
+                className="w-16 h-16 sm:w-20 sm:h-20 object-contain mb-2 drop-shadow-lg"
+                referrerPolicy="no-referrer"
+              />
+              <h3 className="text-xl sm:text-2xl font-bold text-white drop-shadow-md">Parabéns! No Jogo!</h3>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 sm:p-10 text-center">
+              <div className="mb-6 sm:mb-8">
+                <h4 className="text-lg sm:text-xl font-bold text-primary mb-2">Olá, {userName || 'Amigo'}!</h4>
+                <p className="text-sm sm:text-base text-gray-600 mb-6 leading-relaxed">
+                  Seu palpite foi registrado com sucesso em nosso sistema! 🚀<br /><br />
+                  Ficamos muito felizes em ter você conosco. Como forma de agradecimento, você acaba de receber seus <strong>Números da Sorte</strong> para o sorteio do <strong>GAME STICK M15</strong>!
+                </p>
+                
+                <div className="flex flex-wrap justify-center gap-4">
+                  {numbers.map((num, i) => (
+                    <div 
+                      key={i}
+                      className="bg-blue-50 border-2 border-blue-100 rounded-2xl p-4 min-w-[120px] shadow-sm animate-pulse"
+                    >
+                      <span className="block text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-1">CUPOM</span>
+                      <span className="text-3xl font-black text-primary tracking-tighter">{num}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-gray-50 rounded-2xl p-6 mb-8 border border-gray-100">
+                <div className="flex items-center gap-3 mb-3 justify-center">
+                  <Clock className="w-5 h-5 text-secondary" />
+                  <span className="font-bold text-primary">Sorteio: 19 de Julho de 2026</span>
+                </div>
+                <p className="text-[11px] text-gray-500 uppercase font-bold tracking-wider italic">
+                  Dia da Final da Copa do Mundo FIFA 2026
+                </p>
+              </div>
+
+              <button 
+                onClick={onClose}
+                className="w-full bg-primary text-white py-4 rounded-2xl font-bold text-lg hover:shadow-xl transition-all active:scale-[0.98]"
+              >
+                Continuar para minha Carteira
+              </button>
+              
+              <p className="text-xs text-gray-400 mt-6">
+                Você pode consultar seus números a qualquer momento no seu perfil.
+              </p>
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+};
+
 // --- MAIN APP ---
 
 const TermsPage = () => {
@@ -5218,7 +5461,26 @@ const TermsPage = () => {
           </section>
 
           <section>
-            <h2 className="text-2xl font-bold text-primary mb-4">4. Regras Gerais e Conduta</h2>
+            <h2 className="text-2xl font-bold text-primary mb-4">4. Sistema de Indicações (Afiliados)</h2>
+            <ul className="list-disc pl-5 space-y-2">
+              <li><strong>O Bônus:</strong> O usuário ganha R$ 2,00 de bônus por cada novo usuário indicado que realizar seu primeiro depósito (mínimo R$ 10,00).</li>
+              <li><strong>Uso do Link:</strong> A indicação só é válida se o novo usuário se cadastrar utilizando o link exclusivo do indicador.</li>
+              <li><strong>Limites:</strong> O bônus é creditado automaticamente na carteira virtual e pode ser usado para novos palpites.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="text-2xl font-bold text-primary mb-4">5. Sorteios e Promoções</h2>
+            <ul className="list-disc pl-5 space-y-2">
+              <li><strong>Elegibilidade:</strong> Cada palpite (aposta) realizado e pago garante ao usuário um "Número da Sorte" (Cupom) gerado aleatoriamente ou deterministicamente pelo sistema.</li>
+              <li><strong>O Prêmio:</strong> O sorteio atual refere-se a um GAME STICK M15 PRO.</li>
+              <li><strong>Data do Sorteio:</strong> O sorteio será realizado no dia 19 de Julho de 2026, coincidindo com a final da Copa do Mundo FIFA 2026.</li>
+              <li><strong>Divulgação:</strong> O ganhador será anunciado na plataforma e contatado via e-mail/telefone cadastrado.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="text-2xl font-bold text-primary mb-4">6. Regras Gerais e Conduta</h2>
             <ul className="list-disc pl-5 space-y-2">
               <li><strong>Não comercialização:</strong> O BOLÃO10 não é uma casa de apostas. Trata-se de um bolão colaborativo entre amigos e conhecidos.</li>
               <li><strong>Imprevistos:</strong> Caso uma partida seja cancelada ou adiada por tempo indeterminado pela CBF, a partida será considerada "anulada" para fins de pontuação, e o cálculo da rodada será feito com base nas partidas restantes.</li>

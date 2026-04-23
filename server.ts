@@ -578,26 +578,59 @@ app.get('/api/rounds/:id', async (req, res) => {
   }
 });
 
+// Utility to generate a deterministic lucky number if the table is missing
+function getDeterministicLuckyNumber(predictionId: number): string {
+  const seed = predictionId * 1234.567;
+  const num = (Math.abs(Math.sin(seed) * 899999) + 100000);
+  return Math.floor(num).toString();
+}
+
 app.get('/api/my-predictions', authenticate, async (req: any, res) => {
   try {
-    const { data, error } = await supabase
+    // Separate queries to avoid breaking the dashboard if lucky_numbers table is missing
+    const { data: predictions, error: predError } = await supabase
       .from('predictions')
       .select('*, rounds(number, status, games(*)), prediction_items(*)')
       .eq('user_id', req.user.id)
       .order('created_at', { ascending: false });
 
-    if (error) throw error;
+    if (predError) throw predError;
 
-    const formatted = data?.map((p: any) => ({
-      ...p,
-      round_number: p.rounds?.number || '?',
-      round_status: p.rounds?.status || 'open',
-      games: p.rounds?.games?.sort((a: any, b: any) => a.game_order - b.game_order) || [],
-      items: p.prediction_items || []
-    }));
+    let luckyNumbersMap: Record<string, string> = {};
+    try {
+      const { data: lucky, error: luckyQErr } = await supabase
+        .from('lucky_numbers')
+        .select('prediction_id, number')
+        .eq('user_id', req.user.id);
+      
+      if (luckyQErr) {
+        console.warn('Lucky numbers table missing or query error:', JSON.stringify(luckyQErr));
+      } else if (lucky) {
+        lucky.forEach((ln: any) => {
+          luckyNumbersMap[ln.prediction_id] = ln.number;
+        });
+      }
+    } catch (lnErr) {
+      console.warn('Exception fetching lucky numbers:', lnErr);
+    }
+
+    const CAMPAIGN_START_DATE = new Date('2026-04-23T20:00:00Z');
+
+    const formatted = (predictions || [])?.map((p: any) => {
+      const isNewPrediction = new Date(p.created_at) >= CAMPAIGN_START_DATE;
+      return {
+        ...p,
+        round_number: p.rounds?.number || '?',
+        round_status: p.rounds?.status || 'open',
+        games: p.rounds?.games?.sort((a: any, b: any) => a.game_order - b.game_order) || [],
+        items: p.prediction_items || [],
+        lucky_number: luckyNumbersMap[p.id] || (isNewPrediction ? getDeterministicLuckyNumber(p.id) : null)
+      };
+    });
 
     res.json(formatted || []);
-  } catch (err) {
+  } catch (err: any) {
+    console.error('Fetch my predictions error:', err.message || err);
     res.status(500).json({ error: 'Falha ao buscar seus palpites' });
   }
 });
@@ -856,11 +889,13 @@ app.post('/api/predictions', authenticate, upload.single('proof'), async (req: a
       wallet_id: wallet.id,
       amount: -totalCost,
       type: 'bet_deduction',
+      balance_after: newBalance,
       description: `Pagamento de palpites para rodada #${round.number || rId}`
     });
 
     // Insert predictions
     const predictionIds = [];
+    const luckyNumbers = [];
     for (const singleGuess of guessesArray) {
       const { data: predData, error: predErr } = await supabase
         .from('predictions')
@@ -880,6 +915,22 @@ app.post('/api/predictions', authenticate, upload.single('proof'), async (req: a
 
       predictionIds.push(predData.id);
 
+      // Generate Lucky Number
+      const luckyNumber = getDeterministicLuckyNumber(predData.id);
+      try {
+        const { error: luckyErr } = await supabase.from('lucky_numbers').insert({
+          user_id: req.user.id,
+          prediction_id: predData.id,
+          number: luckyNumber
+        });
+        if (luckyErr) {
+          console.warn('Lucky numbers table missing or insert error:', JSON.stringify(luckyErr));
+        }
+      } catch (lnCatch) {
+        console.warn('Exception creating lucky number:', lnCatch);
+      }
+      luckyNumbers.push(luckyNumber);
+
       // Insert items
       const itemsToInsert = Object.entries(singleGuess).map(([gameId, guess]) => ({
         prediction_id: predData.id,
@@ -887,10 +938,14 @@ app.post('/api/predictions', authenticate, upload.single('proof'), async (req: a
         guess
       }));
 
-      await supabase.from('prediction_items').insert(itemsToInsert);
+      const { error: itemsErr } = await supabase.from('prediction_items').insert(itemsToInsert);
+      if (itemsErr) {
+        console.error('Error inserting prediction items:', itemsErr);
+        throw new Error('Falha ao registrar detalhes do palpite');
+      }
     }
 
-    res.json({ success: true, ids: predictionIds, newBalance });
+    res.json({ success: true, ids: predictionIds, newBalance, luckyNumbers });
 
     // Broadcast real-time notification
     sendRealtimeNotification('all', {
@@ -2181,6 +2236,99 @@ app.get('/api/admin/deposits/all', authenticate, isAdmin, async (req, res) => {
   }
 });
 
+app.get('/api/me/lucky-numbers', authenticate, async (req: any, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('lucky_numbers')
+      .select('*')
+      .eq('user_id', req.user.id)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      if (error.code === 'PGRST205') {
+        console.warn('Lucky numbers table missing, returning fallback from predictions');
+        const { data: preds, error: predErr } = await supabase
+          .from('predictions')
+          .select('id, created_at')
+          .eq('user_id', req.user.id)
+          .order('created_at', { ascending: false });
+
+        if (predErr) throw predErr;
+
+        const CAMPAIGN_START_DATE = new Date('2026-04-23T20:00:00Z');
+        const fallbacks = preds?.filter((p: any) => new Date(p.created_at) >= CAMPAIGN_START_DATE).map((p: any) => ({
+          id: `fallback-${p.id}`,
+          user_id: req.user.id,
+          prediction_id: p.id,
+          number: getDeterministicLuckyNumber(p.id),
+          created_at: p.created_at
+        }));
+
+        return res.json(fallbacks || []);
+      }
+      console.error('Fetch my lucky numbers error detail:', JSON.stringify(error));
+      throw error;
+    }
+    res.json(data || []);
+  } catch (err: any) {
+    console.error('Fetch my lucky numbers error:', err.message || err);
+    res.status(500).json({ error: 'Erro ao buscar números da sorte' });
+  }
+});
+
+app.get('/api/admin/lucky-numbers', authenticate, isAdmin, async (req: any, res) => {
+  try {
+    // Try to get from table first
+    const { data, error } = await supabase
+      .from('lucky_numbers')
+      .select('*, users!lucky_numbers_user_id_fkey(name, email, nickname)')
+      .order('created_at', { ascending: false });
+
+    if (!error) {
+      const formatted = data?.map((ln: any) => ({
+        ...ln,
+        user_name: ln.users?.name || 'N/A',
+        user_nickname: ln.users?.nickname || 'N/A',
+        user_email: ln.users?.email || 'N/A'
+      }));
+      return res.json(formatted || []);
+    }
+
+    if (error.code !== 'PGRST205') {
+      console.error('Fetch admin lucky numbers error detail:', JSON.stringify(error));
+      throw error;
+    }
+
+    // Fallback: fetch all predictions and generate deterministic numbers
+    console.warn('Lucky numbers table missing, generating from predictions');
+    const { data: allPredictions, error: allPredError } = await supabase
+      .from('predictions')
+      .select('*, users!predictions_user_id_fkey(name, email, nickname)')
+      .order('created_at', { ascending: false });
+
+    if (allPredError) throw allPredError;
+
+    const CAMPAIGN_START_DATE = new Date('2026-04-23T20:00:00Z');
+
+    const fallbackFormatted = allPredictions?.filter((p: any) => new Date(p.created_at) >= CAMPAIGN_START_DATE).map((p: any) => ({
+      id: `fallback-${p.id}`,
+      user_id: p.user_id,
+      prediction_id: p.id,
+      number: getDeterministicLuckyNumber(p.id),
+      created_at: p.created_at,
+      users: p.users,
+      user_name: p.users?.name || 'N/A',
+      user_nickname: p.users?.nickname || 'N/A',
+      user_email: p.users?.email || 'N/A'
+    }));
+
+    res.json(fallbackFormatted || []);
+  } catch (err: any) {
+    console.error('Fetch all lucky numbers error:', err.message || err);
+    res.status(500).json({ error: 'Erro ao buscar todos os números da sorte' });
+  }
+});
+
 // Admin: User Management
 app.get('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   try {
@@ -2568,6 +2716,9 @@ app.delete('/api/admin/predictions/:id', authenticate, isAdmin, async (req, res)
 
     // Delete items first
     await supabase.from('prediction_items').delete().eq('prediction_id', id);
+    
+    // Delete lucky numbers if they exist
+    await supabase.from('lucky_numbers').delete().eq('prediction_id', id);
     
     // Delete the prediction
     const { error: deleteErr } = await supabase.from('predictions').delete().eq('id', id);
