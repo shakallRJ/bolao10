@@ -8,7 +8,7 @@ export const DepositModal = ({ isOpen, onClose, token, onDepositSuccess }: any) 
   const [amount, setAmount] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [paymentMode, setPaymentMode] = useState<'pagbank' | null>(null);
+  const [paymentMode, setPaymentMode] = useState<'pix' | null>(null);
 
   React.useEffect(() => {
     if (!isOpen) {
@@ -68,13 +68,13 @@ export const DepositModal = ({ isOpen, onClose, token, onDepositSuccess }: any) 
               <div className="pt-4">
                 <button
                   onClick={() => {
-                    if (parseFloat(amount) > 0) setPaymentMode('pagbank');
-                    else setError('Digite um valor válido.');
+                    if (parseFloat(amount) >= 1) setPaymentMode('pix');
+                    else setError('O valor mínimo para depósito é R$ 1,00');
                   }}
-                  className="w-full bg-primary text-white font-bold py-4 rounded-xl hover:bg-secondary transition-all flex items-center justify-center gap-2 shadow-lg"
+                  className="w-full bg-[#00BFA5] text-white font-bold py-4 rounded-xl hover:opacity-90 transition-all flex items-center justify-center gap-2 shadow-lg"
                 >
                   <CreditCard className="w-5 h-5" />
-                  Continuar para Pagamento
+                  Continuar para Depósito (PIX)
                 </button>
               </div>
             </div>
@@ -82,7 +82,8 @@ export const DepositModal = ({ isOpen, onClose, token, onDepositSuccess }: any) 
             <div className="flex justify-center">
               <PagBankCheckout 
                 amount={amount} 
-                token={token} 
+                token={token}
+                initialMethod={paymentMode === 'pix' ? 'pix' : 'credit_card'}
                 onSuccess={() => {
                   onDepositSuccess();
                   onClose();

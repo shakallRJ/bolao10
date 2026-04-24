@@ -1144,36 +1144,43 @@ app.post('/api/pagbank/create-payment', authenticate, async (req: any, res) => {
 
     if (depErr) throw depErr;
 
-    // Notify admins about the new pending deposit
-    try {
-      await addAdminNotification({
-        title: 'Nova Solicitação de Depósito',
-        message: `Usuário ${req.user.name || req.user.nickname || 'Sem Nome'} (${req.user.email}) iniciou um depósito de R$ ${depositAmount.toFixed(2)} via ${method === 'pix' ? 'PIX' : 'Cartão'}.`,
-        type: 'deposit_pending',
-        user_id: req.user.id,
-        user_name: req.user.name || req.user.nickname || 'Sem Nome',
-        user_email: req.user.email,
-        user_phone: req.user.phone,
-        amount: depositAmount
+    // 2. Prepare PIX data
+    const PIX_KEY = 'admin@bolao10.com';
+    
+    // Bypass PagBank API for PIX as requested ("sem validação PAGBANK")
+    if (method === 'pix') {
+      console.log(`[PIX] Forcing manual PIX for user ${req.user.id} - Key: ${PIX_KEY}`);
+      
+      // Notify admins
+      try {
+        await addAdminNotification({
+          title: 'Novo Depósito PIX Gerado',
+          message: `Usuário ${req.user.name || req.user.nickname || 'Sem Nome'} gerou um PIX de R$ ${depositAmount.toFixed(2)}.`,
+          type: 'deposit_pending',
+          user_id: req.user.id,
+          amount: depositAmount
+        });
+      } catch (e) {}
+
+      return res.json({
+        success: true,
+        depositId: deposit.id,
+        pix: {
+          manualKey: PIX_KEY
+        }
       });
-    } catch (notifErr) {
-      console.error('Error sending admin notification for deposit:', notifErr);
-      // Don't fail the request if notification fails
     }
 
-    // 2. Prepare PagBank Request
-    // For Vercel, prioritize custom domain if configured, otherwise use request host
+    // 3. Prepare PagBank Request
     const appUrl = process.env.APP_URL || (req.get('host')?.includes('vercel.app') ? `https://${req.get('host')}` : 'https://www.bolao10.com');
     const webhookUrl = `${appUrl}/api/pagbank/webhook`;
-    
-    console.log(`[PagBank] Usando URL de Webhook: ${webhookUrl}`);
 
     const orderData: any = {
       reference_id: `DEP-${deposit.id}`,
       customer: {
         name: req.user.name,
         email: req.user.email,
-        tax_id: '12345678909', // Dummy CPF for example, should be collected from user
+        tax_id: '12345678909',
         phones: [{ country: '55', area: '21', number: '999999999', type: 'MOBILE' }]
       },
       items: [{
@@ -1184,13 +1191,8 @@ app.post('/api/pagbank/create-payment', authenticate, async (req: any, res) => {
       notification_urls: [webhookUrl]
     };
 
-    if (method === 'pix') {
-      orderData.qr_codes = [{ amount: { value: Math.round(depositAmount * 100) } }];
-    } else if (method === 'credit_card') {
-      if (!cardHash) {
-        throw new Error('Hash do cartão ausente.');
-      }
-
+    if (method === 'credit_card') {
+      if (!cardHash) throw new Error('Hash do cartão ausente.');
       orderData.charges = [{
         reference_id: `CHG-${deposit.id}`,
         description: 'Depósito Bolão10',
@@ -1204,7 +1206,6 @@ app.post('/api/pagbank/create-payment', authenticate, async (req: any, res) => {
       }];
     }
 
-    // PagBank Orders API usually expects "Bearer <TOKEN>"
     const headers: any = {
       'Authorization': `Bearer ${cleanToken}`, 
       'Content-Type': 'application/json',
@@ -1245,6 +1246,19 @@ app.post('/api/pagbank/create-payment', authenticate, async (req: any, res) => {
 
     if (!pbRes.ok) {
       console.error('PagBank API Error Details:', JSON.stringify(pbData, null, 2));
+      
+      // If it's PIX and PagBank failed (e.g. homologation issue), fallback to Manual PIX
+      if (method === 'pix') {
+        console.warn('[PagBank] Bypassing PagBank error for PIX and falling back to manual.');
+        return res.json({
+          success: true,
+          depositId: deposit.id,
+          pix: {
+            manualKey: PIX_KEY
+          }
+        });
+      }
+
       const errorMsg = pbData.error_messages?.[0]?.description || 'Erro na comunicação com PagBank';
       throw new Error(errorMsg);
     }
@@ -1257,13 +1271,14 @@ app.post('/api/pagbank/create-payment', authenticate, async (req: any, res) => {
 
     // 4. Return necessary data to frontend
     if (method === 'pix') {
-      const qrCode = pbData.qr_codes[0];
+      const qrCode = pbData?.qr_codes?.[0];
       res.json({
         success: true,
         depositId: deposit.id,
         pix: {
-          qrcode: qrCode.links.find((l: any) => l.rel === 'QRCODE.PNG')?.href,
-          text: qrCode.text
+          qrcode: qrCode?.links?.find((l: any) => l.rel === 'QRCODE.PNG')?.href,
+          text: qrCode?.text,
+          manualKey: PIX_KEY
         }
       });
     } else {

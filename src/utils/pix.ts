@@ -18,10 +18,11 @@ export function generatePixPayload(key: string, name: string, city: string, amou
     return id + value.length.toString().padStart(2, '0') + value;
   };
 
-  // Normalize name and city (remove accents, uppercase)
-  const normalize = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+  // Normalize name and city (remove accents, keep alphanumeric and spaces, uppercase)
+  const normalize = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9 ]/gi, "").toUpperCase();
   const normalizedName = normalize(name).substring(0, 25);
   const normalizedCity = normalize(city).substring(0, 15);
+  const cleanTxid = txid.replace(/[^A-Z0-9]/gi, "").toUpperCase().substring(0, 25) || '***';
 
   const gui = '0014br.gov.bcb.pix';
   const keyField = formatField('01', key);
@@ -36,7 +37,7 @@ export function generatePixPayload(key: string, name: string, city: string, amou
     formatField('58', 'BR'), // Country Code
     formatField('59', normalizedName), // Merchant Name
     formatField('60', normalizedCity), // Merchant City
-    formatField('62', formatField('05', txid)), // Additional Data Field Template
+    formatField('62', formatField('05', cleanTxid)), // Additional Data Field Template
   ].join('');
 
   const resultWithoutCrc = payload + '6304';
