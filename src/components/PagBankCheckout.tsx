@@ -18,11 +18,11 @@ export const PagBankCheckout: React.FC<PagBankCheckoutProps> = ({ amount, token,
   const [method, setMethod] = useState<'pix' | 'credit_card'>(initialMethod);
   const [loading, setLoading] = useState(false);
   const [pixData, setPixData] = useState<{ qrcode: string; text: string; depositId: string; manual?: boolean } | null>(null);
-  const [hasAutoTriggered, setHasAutoTriggered] = useState(false);
+  const hasTriggeredRef = React.useRef(false);
 
   React.useEffect(() => {
-    if (initialMethod === 'pix' && !hasAutoTriggered && !pixData) {
-      setHasAutoTriggered(true);
+    if (initialMethod === 'pix' && !hasTriggeredRef.current && !pixData) {
+      hasTriggeredRef.current = true;
       const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
       handlePayment(fakeEvent);
     }
@@ -100,20 +100,7 @@ export const PagBankCheckout: React.FC<PagBankCheckoutProps> = ({ amount, token,
       if (method === 'pix') {
         let finalPixData = null;
         
-        if (data.pix.manualKey || !data.pix.qrcode) {
-          // Force manual payload with requested key
-          const pixKey = 'admin@bolao10.com';
-          const payload = generatePixPayload(
-            pixKey,
-            'Bolão 10',
-            'Nova Iguacu',
-            parseFloat(amount),
-            `DEP${data.depositId}`
-          );
-          finalPixData = { qrcode: '', text: payload, depositId: data.depositId, manual: true };
-        } else {
-          finalPixData = { ...data.pix, depositId: data.depositId };
-        }
+        finalPixData = { ...data.pix, depositId: data.depositId };
 
         if (finalPixData) {
           setPixData(finalPixData);
@@ -174,7 +161,7 @@ export const PagBankCheckout: React.FC<PagBankCheckoutProps> = ({ amount, token,
         </div>
 
         <div className="bg-white p-4 border-2 border-gray-100 rounded-2xl inline-block shadow-sm">
-          {pixData.manual ? (
+          {!pixData.qrcode ? (
             <div className="p-2 bg-white">
               <QRCode value={pixData.text} size={192} />
             </div>
@@ -182,15 +169,6 @@ export const PagBankCheckout: React.FC<PagBankCheckoutProps> = ({ amount, token,
             <img src={pixData.qrcode} alt="QR Code PIX" className="w-48 h-48 mx-auto" referrerPolicy="no-referrer" />
           )}
         </div>
-
-        {pixData.manual && (
-          <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 flex items-start gap-3 text-left">
-            <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-            <p className="text-xs text-blue-700 leading-relaxed">
-              <strong>Aviso:</strong> O processamento deste PIX é manual. Após o pagamento, nosso administrador irá conferir e creditar seu saldo em alguns minutos.
-            </p>
-          </div>
-        )}
 
         <div className="space-y-3">
           <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Ou copie o código abaixo</p>
@@ -246,28 +224,108 @@ export const PagBankCheckout: React.FC<PagBankCheckoutProps> = ({ amount, token,
         <span className="text-primary font-bold text-lg">R$ {parseFloat(amount).toFixed(2)}</span>
       </div>
 
-      <div className="bg-blue-50 p-6 rounded-2xl border border-blue-100 flex items-start gap-4 mb-8">
-        <QrCode className="w-8 h-8 text-blue-600 flex-shrink-0 mt-1" />
-        <div className="space-y-1">
-          <p className="font-bold text-blue-900">Depósito via PIX</p>
-          <p className="text-sm text-blue-700 leading-relaxed">
-            Ao clicar no botão abaixo, geraremos um código PIX para você realizar o pagamento. O saldo é creditado automaticamente.
-          </p>
+      {method === 'pix' ? (
+        <div className="bg-blue-50 p-6 rounded-2xl border border-blue-100 flex items-start gap-4 mb-8">
+          <QrCode className="w-8 h-8 text-blue-600 flex-shrink-0 mt-1" />
+          <div className="space-y-1">
+            <p className="font-bold text-blue-900">Depósito via PIX</p>
+            <p className="text-sm text-blue-700 leading-relaxed">
+              Ao clicar no botão abaixo, geraremos um código PIX para você realizar o pagamento. O saldo é creditado automaticamente.
+            </p>
+          </div>
         </div>
-      </div>
+      ) : (
+        <form id="cc-form" onSubmit={handlePayment} className="space-y-4 mb-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Nome no Cartão</label>
+            <input
+              type="text"
+              required
+              value={cardData.name}
+              onChange={(e) => setCardData({ ...cardData, name: e.target.value })}
+              className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary focus:border-primary"
+              placeholder="Como está no cartão"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Número do Cartão</label>
+            <input
+              type="text"
+              required
+              maxLength={19}
+              value={cardData.number}
+              onChange={(e) => {
+                const val = e.target.value.replace(/\D/g, '');
+                const formatted = val.replace(/(\d{4})/g, '$1 ').trim();
+                setCardData({ ...cardData, number: formatted });
+              }}
+              className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary focus:border-primary font-mono text-sm"
+              placeholder="0000 0000 0000 0000"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Validade</label>
+              <input
+                type="text"
+                required
+                maxLength={5}
+                value={cardData.expiry}
+                onChange={(e) => {
+                  let val = e.target.value.replace(/\D/g, '');
+                  if (val.length >= 2) {
+                    val = val.substring(0, 2) + '/' + val.substring(2, 4);
+                  }
+                  setCardData({ ...cardData, expiry: val });
+                }}
+                className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary focus:border-primary font-mono text-sm"
+                placeholder="MM/AA"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">CVV</label>
+              <input
+                type="text"
+                required
+                maxLength={4}
+                value={cardData.cvv}
+                onChange={(e) => setCardData({ ...cardData, cvv: e.target.value.replace(/\D/g, '') })}
+                className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary focus:border-primary font-mono text-sm"
+                placeholder="123"
+              />
+            </div>
+          </div>
+        </form>
+      )}
 
-      <button
-        onClick={handlePayment}
-        disabled={loading}
-        className="w-full bg-[#00BFA5] text-white font-bold py-5 rounded-2xl hover:opacity-90 transition-all flex items-center justify-center gap-3 shadow-lg shadow-emerald-100 disabled:opacity-50"
-      >
-        {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : (
-          <>
-            <QrCode className="w-6 h-6" />
-            Gerar QR Code PIX
-          </>
-        )}
-      </button>
+      {method === 'pix' ? (
+        <button
+          onClick={handlePayment}
+          disabled={loading}
+          className="w-full bg-[#00BFA5] text-white font-bold py-5 rounded-2xl hover:opacity-90 transition-all flex items-center justify-center gap-3 shadow-lg shadow-emerald-100 disabled:opacity-50"
+        >
+          {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : (
+            <>
+              <QrCode className="w-6 h-6" />
+              Gerar QR Code PIX
+            </>
+          )}
+        </button>
+      ) : (
+        <button
+          type="submit"
+          form="cc-form"
+          disabled={loading || !cardData.name || !cardData.number || !cardData.expiry || !cardData.cvv}
+          className="w-full bg-primary text-white font-bold py-5 rounded-2xl hover:bg-secondary transition-all flex items-center justify-center gap-3 shadow-lg disabled:opacity-50"
+        >
+          {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : (
+            <>
+              <CreditCard className="w-6 h-6" />
+              Pagar R$ {parseFloat(amount).toFixed(2)}
+            </>
+          )}
+        </button>
+      )}
 
       <button 
         onClick={onCancel}

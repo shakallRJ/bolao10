@@ -65,7 +65,7 @@ export const DepositModal = ({ isOpen, onClose, token, onDepositSuccess }: any) 
                 ))}
               </div>
 
-              <div className="pt-4">
+              <div className="pt-4 grid grid-cols-2 gap-3">
                 <button
                   onClick={() => {
                     if (parseFloat(amount) >= 1) setPaymentMode('pix');
@@ -74,7 +74,17 @@ export const DepositModal = ({ isOpen, onClose, token, onDepositSuccess }: any) 
                   className="w-full bg-[#00BFA5] text-white font-bold py-4 rounded-xl hover:opacity-90 transition-all flex items-center justify-center gap-2 shadow-lg"
                 >
                   <CreditCard className="w-5 h-5" />
-                  Continuar para Depósito (PIX)
+                  PIX
+                </button>
+                <button
+                  onClick={() => {
+                    if (parseFloat(amount) >= 1) setPaymentMode('credit_card');
+                    else setError('O valor mínimo para depósito é R$ 1,00');
+                  }}
+                  className="w-full bg-primary text-white font-bold py-4 rounded-xl hover:bg-secondary transition-all flex items-center justify-center gap-2 shadow-lg"
+                >
+                  <CreditCard className="w-5 h-5" />
+                  Cartão
                 </button>
               </div>
             </div>
