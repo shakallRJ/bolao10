@@ -1144,32 +1144,9 @@ app.post('/api/pagbank/create-payment', authenticate, async (req: any, res) => {
 
     if (depErr) throw depErr;
 
-    // 2. Prepare PIX data
+    // Remove PIX manual override
     const PIX_KEY = 'admin@bolao10.com';
-    
-    // Bypass PagBank API for PIX as requested ("sem validação PAGBANK")
-    if (method === 'pix') {
-      console.log(`[PIX] Forcing manual PIX for user ${req.user.id} - Key: ${PIX_KEY}`);
-      
-      // Notify admins
-      try {
-        await addAdminNotification({
-          title: 'Novo Depósito PIX Gerado',
-          message: `Usuário ${req.user.name || req.user.nickname || 'Sem Nome'} gerou um PIX de R$ ${depositAmount.toFixed(2)}.`,
-          type: 'deposit_pending',
-          user_id: req.user.id,
-          amount: depositAmount
-        });
-      } catch (e) {}
 
-      return res.json({
-        success: true,
-        depositId: deposit.id,
-        pix: {
-          manualKey: PIX_KEY
-        }
-      });
-    }
 
     // 3. Prepare PagBank Request
     const appUrl = process.env.APP_URL || (req.get('host')?.includes('vercel.app') ? `https://${req.get('host')}` : 'https://www.bolao10.com');
@@ -1203,6 +1180,14 @@ app.post('/api/pagbank/create-payment', authenticate, async (req: any, res) => {
           capture: true,
           card: { encrypted: cardHash }
         }
+      }];
+    } else if (method === 'pix') {
+      const expirationDate = new Date();
+      expirationDate.setHours(expirationDate.getHours() + 1); // Expiration in 1 hour
+      
+      orderData.qr_codes = [{
+        amount: { value: Math.round(depositAmount * 100) },
+        expiration_date: expirationDate.toISOString()
       }];
     }
 
@@ -1246,18 +1231,6 @@ app.post('/api/pagbank/create-payment', authenticate, async (req: any, res) => {
 
     if (!pbRes.ok) {
       console.error('PagBank API Error Details:', JSON.stringify(pbData, null, 2));
-      
-      // If it's PIX and PagBank failed (e.g. homologation issue), fallback to Manual PIX
-      if (method === 'pix') {
-        console.warn('[PagBank] Bypassing PagBank error for PIX and falling back to manual.');
-        return res.json({
-          success: true,
-          depositId: deposit.id,
-          pix: {
-            manualKey: PIX_KEY
-          }
-        });
-      }
 
       const errorMsg = pbData.error_messages?.[0]?.description || 'Erro na comunicação com PagBank';
       throw new Error(errorMsg);
@@ -1312,13 +1285,20 @@ app.post('/api/pagbank/create-payment', authenticate, async (req: any, res) => {
 async function approveDeposit(deposit: any) {
   if (deposit.status === 'approved') return false;
 
-  // 1. Update deposit status
-  const { error: updateErr } = await supabase
+  // 1. Update deposit status securely to avoid double-processing
+  const { data: updatedRows, error: updateErr } = await supabase
     .from('deposits')
     .update({ status: 'approved' })
-    .eq('id', deposit.id);
+    .eq('id', deposit.id)
+    .eq('status', 'pending')
+    .select();
   
   if (updateErr) throw updateErr;
+
+  if (!updatedRows || updatedRows.length === 0) {
+    console.log(`Deposit ${deposit.id} already processed concurrently.`);
+    return false;
+  }
 
   // 2. Update wallet balance
   const { data: wallet } = await supabase
@@ -1336,14 +1316,75 @@ async function approveDeposit(deposit: any) {
 
     // 3. Record transaction
     try {
-      await supabase.from('transactions').insert([{
+      await supabase.from('wallet_transactions').insert([{
         user_id: deposit.user_id,
         wallet_id: wallet.id,
         type: 'deposit',
         amount: deposit.amount,
+        balance_after: newBalance,
         description: `Depósito via PagBank (${deposit.payment_method || 'PIX'})`,
-        status: 'completed'
+        reference_id: deposit.id
       }]);
+
+      // 3.1 Check for Referral Bonus
+      const amountFloat = parseFloat(deposit.amount);
+      if (amountFloat >= 10) {
+        // Check if user was referred and bonus is unpaid
+        const { data: referral } = await supabase
+          .from('referrals')
+          .select('*')
+          .eq('referred_id', deposit.user_id)
+          .eq('bonus_paid', false)
+          .maybeSingle();
+
+        if (referral) {
+          const referrerId = referral.referrer_id;
+          
+          // Get referrer's wallet
+          const { data: referrerWallet } = await supabase
+            .from('wallets')
+            .select('*')
+            .eq('user_id', referrerId)
+            .single();
+
+          if (referrerWallet) {
+            const bonusAmount = parseFloat(referral.bonus_amount || '2.00');
+            const referrerNewBalance = parseFloat(referrerWallet.balance) + bonusAmount;
+
+            // Update referrer's wallet
+            await supabase
+              .from('wallets')
+              .update({ balance: referrerNewBalance, updated_at: new Date().toISOString() })
+              .eq('id', referrerWallet.id);
+
+            // Insert transaction for referral bonus
+            await supabase.from('wallet_transactions').insert([{
+              user_id: referrerId,
+              wallet_id: referrerWallet.id,
+              amount: bonusAmount,
+              type: 'referral_bonus',
+              balance_after: referrerNewBalance,
+              reference_id: deposit.id,
+              description: `Bônus por indicação de amigo (${deposit.user_id})`
+            }]);
+
+            // Mark referral as paid
+            await supabase
+              .from('referrals')
+              .update({ bonus_paid: true, updated_at: new Date().toISOString() })
+              .eq('id', referral.id);
+
+            // Notify referrer
+            sendRealtimeNotification(referrerId, {
+              id: `ref-paid-${referral.id}`,
+              type: 'referral_bonus_paid',
+              title: '🎁 Bônus de Indicação!',
+              message: `Você ganhou R$ ${bonusAmount.toFixed(2)} pelo primeiro depósito do seu amigo!`,
+              amount: bonusAmount
+            });
+          }
+        }
+      }
     } catch (tErr) {
       console.error('Error recording transaction:', tErr);
     }
@@ -1681,6 +1722,19 @@ app.post('/api/admin/deposits/:id/approve', authenticate, isAdmin, async (req: a
     if (deposit.status !== 'pending') return res.status(400).json({ error: 'Depósito já processado' });
 
     if (status === 'approved') {
+      // 1. Update deposit first securely
+      const { data: updatedRows, error: updateErr } = await supabase
+        .from('deposits')
+        .update({ status: 'approved' })
+        .eq('id', deposit.id)
+        .eq('status', 'pending')
+        .select();
+
+      if (updateErr) throw updateErr;
+      if (!updatedRows || updatedRows.length === 0) {
+        return res.status(400).json({ error: 'Depósito já processado' });
+      }
+
       // Get wallet
       const { data: wallet, error: walErr } = await supabase
         .from('wallets')
@@ -1692,7 +1746,7 @@ app.post('/api/admin/deposits/:id/approve', authenticate, isAdmin, async (req: a
 
       const newBalance = parseFloat(wallet.balance) + parseFloat(deposit.amount);
 
-      // 1. Update Wallet
+      // 2. Update Wallet
       const { error: updateWalErr } = await supabase
         .from('wallets')
         .update({ balance: newBalance, updated_at: new Date().toISOString() })
